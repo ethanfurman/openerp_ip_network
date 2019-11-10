@@ -1,0 +1,12 @@
+"id","name","model_id:id","group_id:id","perm_read","perm_write","perm_create","perm_unlink"
+access_ip_network_network_all,ip_network_network_all,model_ip_network_network,,1,0,0,0
+access_ip_network_device_type_all,ip_network_device_type_all,model_ip_network_device_type,,1,0,0,0
+access_ip_network_device_all,ip_network_device_all,model_ip_network_device,,1,0,0,0
+access_ip_network_extra_field_all,ip_network_extra_field_all,model_ip_network_extra_field,,1,0,0,0
+access_ip_network_extra_command_all,ip_network_extra_command_all,model_ip_network_extra_command,,1,0,0,0
+
+access_ip_network_network_manager,ip_network_network_manager,model_ip_network_network,,1,1,1,1
+access_ip_network_device_type_manager,ip_network_device_type_manager,model_ip_network_device_type,,1,1,1,1
+access_ip_network_device_manager,ip_network_device_manager,model_ip_network_device,,1,1,1,1
+access_ip_network_extra_field_manager,ip_network_extra_field_manager,model_ip_network_extra_field,,1,1,1,1
+access_ip_network_extra_command_manager,ip_network_extra_command_manager,model_ip_network_extra_command,,1,1,1,1

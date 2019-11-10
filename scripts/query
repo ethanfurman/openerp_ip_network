@@ -1,0 +1,778 @@
+#!/usr/local/sbin/suid-python --virtualenv
+
+# docstring
+"""\
+Get and run the commands in IP Network Command section, collect and
+process the data using the scripts from the configuration section, and
+feed the results back to OpenERP.
+
+Due to threading issues when running inside OpenERP, this utility exists to
+do the heavy lifting outside the OpenERP process space.
+"""
+
+# imports
+
+from __future__ import print_function
+from aenum import MultiValueEnum
+from antipathy import Path
+from dbf import Date, DateTime, Time
+from ipaddress import IPv4Network, IPv4Address
+from scription import *
+from openerplib import get_connection, get_records, DEFAULT_SERVER_DATE_FORMAT
+from openerplib import DEFAULT_SERVER_TIME_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT
+from openerplib.dates import datetime_to_str, utc_datetime
+from Queue import Queue, Empty
+from threading import Thread, Lock#, active_count#, current_thread
+from traceback import format_exc
+# from traceback import extract_tb, format_exc, format_list
+import sys
+import termios
+import time
+
+import logging
+import logging.handlers
+
+import os
+
+START = time.time()
+
+# globals
+
+VIRTUAL_ENV = os.environ['VIRTUAL_ENV']
+CONFIG = Path('/%s/config/fnx.ini' % VIRTUAL_ENV)
+MACHINES = Path('/%s/config/machines.dbf' % VIRTUAL_ENV)
+
+try:
+    settings = OrmFile(CONFIG)
+except Exception:
+    print('WARNING: unable to process configfile; all parameters must be specified', file=stderr)
+    HOST = ''
+    USER = ''
+    DB = ''
+    PW = ''
+    NETWORK_PW = ''
+else:
+    HOST = settings.openerp.host
+    USER = settings.openerp.user
+    DB = settings.openerp.db
+    PW = settings.openerp.pw
+    NETWORK_PW = settings.network.pw
+
+# API
+
+@Script(
+        host=('host where OpenERP instance is running', OPTION),
+        db=('database to use', OPTION),
+        user=('login name to use', OPTION),
+        pw=('password for login name', OPTION),
+        log=Spec('logging level to use', OPTION, abbrev=None, force_default='INFO', type=u.upper),
+        log_file=Spec('file to log to', OPTION, abbrev=None, force_default='%s/var/log/openerp/ip_network_query.log' % VIRTUAL_ENV),
+        )
+def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
+    global Type, convert, _logger, oe, device_type
+    # set up logging
+    log_level = getattr(logging, log)
+    main_logger = logging.getLogger()
+    main_logger.setLevel(log_level)
+    handler = logging.handlers.TimedRotatingFileHandler(log_file, when='W0', backupCount=52)
+    handler.setFormatter(Formatter('%(asctime)s %(pid)d %(name)s %(levelname)s: %(message)s'))
+    main_logger.addHandler(handler)
+    _logger = logging.getLogger('ip_network_query')
+    _logger.setLevel(log_level)
+    _logger.debug('logging is on-line')
+    # set up openerp connection info
+    if host:
+        module.HOST = host
+    if db:
+        module.DB = db
+    if user:
+        module.USER = user
+    if pw:
+        module.PW = pw
+    for req in ('HOST', 'USER', 'DB', 'PW'):
+        if not module[req]:
+            raise SystemExit('%r required; use --help for more info' % req)
+    # link to openerp tables
+    oe = get_connection(hostname=HOST, database=DB, login=USER, password=PW)
+    oe.network = oe.get_model('ip_network.network')
+    oe.device = oe.get_model('ip_network.device')
+    oe.command = oe.get_model('ip_network.extra.command')
+    oe.type = oe.get_model('ip_network.device.type')
+    Type = IDEnum(
+            'Type',
+            [
+                (t.short_name, (t.id, 'type.'+t.short_name))
+                for t in get_records(oe.type)
+                ])
+    convert = {
+            MultiValueEnum: lambda v: v.name,
+            IDEnum: lambda v: v.value,
+            Status: lambda v: v.name,
+            Type: lambda v: v.value,
+            Date: lambda v: v.strftime(DEFAULT_SERVER_DATE_FORMAT),
+            Time: lambda v: v.strftime(DEFAULT_SERVER_TIME_FORMAT),
+            DateTime: lambda v: v.strftime(DEFAULT_SERVER_DATETIME_FORMAT),
+            IPv4Address: lambda v: str(v),
+            }
+    # create device test function
+    tests = ['def device_type(ports):']
+    for dt in sorted(get_records(oe.type), key=lambda dt: dt.sequence):
+        if dt.test:
+            tests.append('    if %s: return %s' % (dt.test, Type(dt.id)))
+    tests.append('    else: return Type.Unknown')
+    device_type = '\n'.join(tests)
+    sandbox = {'Type': Type}
+    exec(device_type, sandbox)
+    device_type = sandbox['device_type']
+
+
+@Command(
+        networks=Spec('ip/networks to run commands for', MULTIREQ, ),
+        scan_timeout=Spec('how long to allow ip scan to run', OPTION),
+        threads=Spec('number of threads to use', OPTION, 'j'),
+        delay=Spec('delay between port scans', OPTION),
+        update=Spec('update OpenERP with results', FLAG,)
+        )
+def for_openerp(networks=None, scan_timeout=900, threads=128, delay=2, update=True):
+    "run all commands and update OpenERP"
+    global SCAN_TIMEOUT
+    SCAN_TIMEOUT = scan_timeout
+    _logger.info('in for_openerp')
+    _logger.debug('networks=%r', networks)
+    _logger.debug('scan_timeout=%r', scan_timeout)
+    if not networks:
+        # get them from OpenERP
+        networks = [
+                unicode(n.network)
+                for n in get_records(oe.network)
+                ]
+    commands = [
+            c
+            for c in get_records(oe.command)
+            if c.where in ('ssh', 'local')
+            ]
+    addresses = []
+    for network in networks:
+        if network.endswith('/32'):
+            addresses.extend(list(IPv4Network(network)))
+        else:
+            addresses.extend([h for h in IPv4Network(network).hosts()])
+    errors = {}
+    if update and threads:
+        # simulteaneous updates, updater is True
+        updater = TaskPool(12, name='OE-update')
+    else:
+        # possible sequential updates, updater is True or False
+        updater = update
+    try:
+        if threads:
+            process_simultaneous_hosts_commands(commands, addresses, errors, pool_size=24, delay=delay, update_server=updater)
+        else:
+            process_sequential_hosts_commands(commands, addresses, errors, update_server=updater)
+    finally:
+        display_errors(errors)
+
+
+@Command()
+@Alias('list')
+def list_commands():
+    "list the available commands"
+    echo('Available commands:')
+    for cmd in get_records(oe.command):
+        if cmd.where not in ('ssh', 'local'):
+            continue
+        echo('  %2d: %s -- %s' % (cmd.sequence, cmd.name, cmd.command), end='')
+        # if cmd.help:
+        #     echo(' -->', cmd.help)
+        # else:
+        echo()
+
+
+@Command(
+        command=Spec('which command to run', ),
+        networks=('which network(s) to test against', MULTIREQ),
+        scan_timeout=Spec('how long to allow ip scan to run', OPTION),
+        threads=Spec('number of threads to use', OPTION, 'j')
+        )
+def test(command, networks, scan_timeout=60, threads=0):
+    "run any 1-10 commands, plus the specified COMMAND, against IP"
+    global SCAN_TIMEOUT
+    SCAN_TIMEOUT = scan_timeout
+    command = command.lower().replace(' ', '_')
+    commands = get_records(oe.command)
+    valid_commands = [c for c in commands if c.where in ('ssh', 'local')]
+    valid_command_names = [c.name.lower().replace(' ', '_') for c in valid_commands]
+    print('valid command names: %r' % (valid_command_names, ), verbose=3)
+    if command == 'all':
+        cmds = commands
+    elif command not in valid_command_names:
+        abort('unrecognized command: %s  [choices: %s]' % (command, ', '.join(valid_command_names)))
+    else:
+        cmds = [c for c in commands if c.sequence <= 10 or c.name.lower().replace(' ', '_') == command]
+    addresses = []
+    for network in networks:
+        hosts = [h for h in IPv4Network(network).hosts()]
+        if not hosts:
+            hosts = list(IPv4Network(network))
+        addresses.extend(hosts)
+    print('addresses: %r' % addresses, verbose=3)
+    errors = {}
+    if not threads:
+        results = process_sequential_hosts_commands(cmds, addresses, errors)
+    else:
+        results = process_simultaneous_hosts_commands(cmds, addresses, errors, threads, delay=0.5)
+    echo()
+    for ip, result in sorted(results.items()):
+        echo(ip)
+        for cmd_name, subdict in sorted(result.items()):
+            if subdict is not None:
+                echo('    ', cmd_name, end='')
+                for k, v in sorted(subdict.items()):
+                    if k == 'value':
+                        continue
+                    echo(' [%s: %r]' % (k, v), end='')
+                echo(end=': ')
+                data = subdict.get('value', {})
+                if isinstance(data, basestring):
+                    data = data.strip().split('\n')
+                    if len(data) == 1:
+                        echo(data[0])
+                    else:
+                        echo()
+                        for line in data:
+                            echo('        ', line)
+                else:
+                    echo(repr(data))
+    display_errors(errors)
+
+# support
+
+def update_openerp(ip, results):
+    "find and update the appropriate record in OpenERP"
+    print('[%15.5f]  updating %s on OpenERP' % (time.time()-START, ip))
+    ip = str(ip)
+    values = {}
+    for field, subdict in results.items():
+        try:
+            value = subdict['value']
+        except KeyError:
+            # status only result
+            field = 'status'
+            value = subdict['status']
+        value = convert.get(type(value), lambda v: v)(value)
+        values[field] = value
+    if ip != values['ip_addr']:
+        raise ValueError('IP %r is not the same as ip_addr %r' % (ip, values['ip_addr']))
+    device = get_records(oe.device, domain=[('ip_addr','=',ip)], fields=['id', 'ip_addr', 'name'], max_qty=1)
+    if not device:
+        if values['status'] != 'offline':
+            # create record
+            print('[%15.5f]  creating device for %s' % (time.time()-START, ip), verbose=2)
+            print('                  using: %r' % (values, ), verbose=3)
+            try:
+                oe.device.create(values)
+            except Exception as exc:
+                raise CreateFailure('Unable to create %r [%s]' % (ip, exc))
+    else:
+        # update record
+        print('[%15.5f]  updating device %s' % (time.time()-START, ip), verbose=2)
+        print('                  using: %r' % (values, ), verbose=3)
+        [device] = device
+        try:
+            oe.device.write(device.id, values)
+        except Exception as exc:
+            raise UpdateFailure('Unable to update %r [id: %r] [%s]' % (ip, device.id, exc))
+    return True
+
+def process_sequential_hosts_commands(commands, addresses, errors, update_server=None):
+    print('[%15.5f]  sesquentialy queued to run:  %s' % (time.time()- START, ', '.join([c.name for c in commands])), verbose=1)
+    print('                  for', addresses, verbose=2)
+    print()
+    results = dict([(a, {}) for a in addresses])
+    for host in addresses:
+        host_results, host_errors = process_host(host, commands)
+        results[host] = host_results
+        for ip, outputs in host_errors['by_ip'].items():
+            for output, command_names in outputs.items():
+                errors.setdefault('by_ip', {}).setdefault(ip, {}).setdefault(output, []).extend(command_names)
+        for cmd, problem in host_errors['by_command'].items():
+            errors.setdefault('by_command', {}).setdefault(cmd, []).append(problem)
+        print([(str(k), str(v)) for k, v in results.items()], border='table', verbose=3)
+        if update_server:
+            update_openerp(host, results)
+    return results
+
+def process_simultaneous_hosts_commands(commands, addresses, errors, pool_size, delay=0, update_server=None):
+    print('[%15.5f]  simultaneously queued to run:  %s' % (time.time()-START, ', '.join([c.name for c in commands])), verbose=1)
+    print('                  for', addresses, verbose=2)
+    print()
+    results = dict([(a, {}) for a in addresses])
+    # set up queues for parallel execution
+    with TaskPool(pool_size, delay=delay, name='nmap') as pool:
+        submitted = 0
+        for ip in results:
+            pool.add_task(process_host, address=ip, commands=commands)
+            submitted += 1
+        print('[%15.5f]  %d tasks submitted' % (time.time()-START, submitted), verbose=2)
+        while pool.active:
+            task = pool.get_result()
+            ip = task.kwds['address']
+            host_results, host_errors = task()
+            results[ip] = host_results
+            for ip, outputs in host_errors['by_ip'].items():
+                for output, command_names in outputs.items():
+                    errors.setdefault('by_ip', {}).setdefault(ip, {}).setdefault(output, []).extend(command_names)
+            for cmd, problem in host_errors['by_command'].items():
+                errors.setdefault('by_command', {}).setdefault(cmd, []).append(problem)
+            if update_server:
+                # register results for OpenERP updates
+                update_server.add_task(update_openerp, ip=ip, results=host_results)
+            pool.result_done()
+    if update_server:
+        with update_server:
+            while update_server.active:
+                task = update_server.get_result()
+                ip = task.kwds['ip']
+                try:
+                    task()
+                except Exception:
+                    errors['by_ip'].setdefault(ip, {}).setdefault('UPDATE FAILURE:\n%s' % (format_exc().strip(), ), []).append('write to OpenERP')
+                update_server.result_done()
+    return results
+
+def process_host(address, commands):
+    results = {}
+    status = []
+    clues = set()
+    errors = {}
+    for cmd in commands:
+        print('[%15.5f]  %s  ->  %r' % (time.time()-START, address, repr(cmd.command)), verbose=2)
+        try:
+            ran = single_command(cmd, results, errors, address)
+        except UnableToContact:
+            status.append(Status.offline)
+            break
+        except ScriptError:
+            results[cmd.name] = {'status': Status.danger}
+            # error('ScriptError received, aborting for', address)
+            # break
+        else:
+            if not ran:
+                continue
+            for command, subdict in results.items():
+                if 'status' in subdict:
+                    cmd_status = subdict['status']
+                    print('appending status %r for command %r' % (cmd_status, command), verbose=3)
+                    status.append(cmd_status)
+                    if not isinstance(cmd_status, Status):
+                        cmd_status = Status(cmd_status)
+                    if cmd_status in (Status.warning, Status.danger):
+                        clues.add(command)
+    if status:
+        # combine various statusi into one status field
+        results['status'] = {'value': max(status)}
+        results['clues'] = {'value': ', '.join(clues)}
+        if Status.offline in status:
+            # do not update previous clues if machine is off-line
+            del results['clues']
+    print('results keys: %r' % results.keys(), verbose=3)
+    return results, errors
+
+
+def single_command(command, results, errors, address):
+    print('[%15.5f]  processing %r' % (time.time()-START, command.name))
+    commandline = command.command % {'ip':address}
+    if command.where == 'ssh':
+        remove_first_line = True
+        password = NETWORK_PW
+        pty = True
+        commandline = (
+            'ssh root@%(ip)s -o StrictHostKeyChecking=no -o HashKnownHosts=no -o ConnectTimeout=30 '
+            + commandline
+            ) % {'ip':address}
+    else:
+        remove_first_line = False
+        password = None
+        pty = False
+    print('Types:', list(Type), verbose=3)
+    run_for = [Type(id) for id in command.run_for_ids]
+    print('restrict to:', ', '.join([str(t) for t in run_for]), verbose=3)
+    if run_for and results.get('type_id', {}).get('value', None) not in run_for:
+        return False
+    job = Job(commandline, pty=pty)
+    exc = None
+    try:
+        job.communicate(timeout=SCAN_TIMEOUT, password=password)
+    except Exception as exc:
+        pass
+    finally:
+        job.close()
+    lines = job.stdout.strip().split('\n')
+    if '[sudo]' in lines[0] or remove_first_line:
+        lines.pop(0)
+    text = '\n'.join(lines)
+    if job.returncode:
+        message = []
+        if text.strip():
+            message.append('[stdout]')
+            message.append('   %s' % '\n   '.join(lines))
+        message.append('[stderr:  %s]' % job.returncode)
+        message.append('   %s' % '\n   '.join([l for l in job.stderr.strip().split('\n')]))
+        job_error = '\n'.join(message)
+        errors.setdefault('by_ip', {}).setdefault(address, {}).setdefault(job_error, []).append(command.name)
+        errors.setdefault('by_command', {})[command.name] = address
+        if command.name == 'Open Ports':
+            raise UnableToContact('no Open Ports results\n\n%s\n\n===================' % '\n'.join(message))
+        return
+    sandbox = {
+            'text':text,
+            'result':results,
+            'ref':Type,
+            'device_type':device_type,
+            'ip_addr':address,
+            'Execute':Execute,
+            'cmd_name': command.name,
+            'Blocks':Blocks,
+            'Status':Status,
+            'clock':lambda: datetime_to_str(utc_datetime()),
+            }
+    print(results, border='flag', verbose=3)
+    try:
+        exec(command.script, sandbox)
+        for field_name, subdict in sandbox['result'].items():
+            print('-----', verbose=3)
+            print('field_name: %r' % (field_name, ), verbose=3)
+            print('subdict: %r' % (subdict, ), verbose=3)
+            # print('%s: %r' % (field_name, subdict['value']), verbose=3)
+    except Exception:
+        job_error = '%(stdout)s\n---\n%(stderr)s' % {
+                'stdout': job.stdout.strip(),
+                'stderr': format_exc().strip(),
+                }
+        errors.setdefault('by_ip', {}).setdefault(address, {}).setdefault(job_error, []).append(command.name)
+        errors.setdefault('by_command', {})[command.name] = address
+        exc = sys.exc_info()[1]
+        raise ScriptError('error processing %s results: %r' % (command.name, exc))
+    if results['portscan']['status'] is Status.offline:
+        # Open Ports should be the first thing that runs
+        # if there are no results after this, no point in continuing
+        # with this host
+        errors.setdefault('by_ip', {})
+        errors.setdefault('by_command', {})['Unreachable Hosts'] = address
+        # make sure ip_addr is set
+        results['ip_addr'] = {'value': address}
+        raise UnableToContact('Open Ports failed')
+    # sandbox['result'] should be, e.g. with hostname:
+    #   {
+    #     'hostname': {'value':'falcon-11-100'},
+    #     'hostname': {'value':'openerp'},
+    #   }
+    # this allows a script to set more than one field at a time
+    return True
+
+
+class Blocks(object):
+    "yields one block of text at a time"
+    def __init__(self, text, length=None):
+        self.lines = text.strip().split('\n')
+        self.lines.reverse()
+        self.length = length
+    def __iter__(self):
+        lines = self.lines
+        length = self.length
+        while 'processing lines':
+            block = []
+            while lines:
+                line = lines.pop()
+                if length is None and not line.strip():
+                    # if blocks are blank-line delimited
+                    break
+                block.append(line)
+                if len(block) == length:
+                    # if blocks are fixed-size
+                    break
+            if block:
+                yield block
+            if not lines:
+                break
+
+
+class DelayQueue(object):
+    "Queue that releases items at least n seconds apart"
+
+    __get_lock = Lock()
+
+    def __init__(self, maxsize=0, delay=0, name='unknown'):
+        self.__dict__['queue'] = Queue(maxsize)
+        self.__dict__['delay'] = delay
+        self.__dict__['_last_access'] = 0
+        self.__dict__['_name'] = name
+
+    # Automatic delegation
+    def __getattr__(self, attr):
+        return getattr(self.queue, attr)
+
+    def __setattr__(self, attr, value):
+        if attr in self.__dict__:
+            self.__dict__[attr] = value
+        else:
+            setattr(self.queue, attr, value)
+
+    # overrides
+    def get(self):
+        with self.__get_lock:
+            now = time.time()
+            result = self.queue.get()
+            passed = now - self._last_access
+            delay = self.delay - passed
+            if result is not None and passed < self.delay:
+                echo('wating %s seconds' % delay)
+                time.sleep(delay)
+            now = time.time()
+            self._last_access = now
+            return result
+
+
+
+class TaskPool(object):
+    "Pool of threads consuming tasks from a queue"
+
+    def __init__(self, num_threads, delay=0, name='strange'):
+        self.size = num_threads
+        self.tasks = DelayQueue(delay=delay, name=name)
+        self.results = Queue()
+        self.active = 0
+        self.abort = False
+        self.is_running = False
+        self._name = name
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, cls, exc, tb):
+        if (cls, exc, tb) != (None, None, None):
+            # escaped exception, abort any queued tasks
+            self.abort = True
+            while 'looking for tasks':
+                try:
+                    self.tasks.get_nowait()
+                    self.tasks.task_done()
+                    self.active -= 1
+                except Empty:
+                    break
+        self.shutdown()
+
+    def add_result(self, result):
+        self.results.put(result)
+
+    def add_task(self, func, *args, **kwds):
+        "Add a task to the queue, incrementing work counter"
+        self.active += 1
+        if isinstance(func, (Task, type(None))):
+            task = func
+        else:
+            task = Task(func, *args, **kwds)
+        self.tasks.put(task)
+
+    def get_result(self):
+        "Get result from queue, decrementing work counter"
+        if not self.active:
+            raise Empty
+        res = self.results.get()
+        self.active -= 1
+        if not isinstance(res, Task):
+            # problem occured in TaskPool framework...
+            cls, exc, tb = res
+            raise cls, exc, tb
+        return res
+
+    def get_task(self):
+        return self.tasks.get()
+
+    def result_done(self):
+        self.results.task_done()
+
+    def shutdown(self):
+        "Signal threads to exit, wait until they have"
+        for _ in range(self.size):
+            self.tasks.put(None)
+        self.wait_completion()
+        self.is_running = False
+
+    def start(self):
+        "Start threads running"
+        if not self.is_running:
+            for _ in range(self.size):
+                TaskThread(self)
+            self.is_running = True
+
+    def task_done(self):
+        self.tasks.task_done()
+
+    def wait_completion(self):
+        "Wait for completion of all the tasks in the queue"
+        self.tasks.join()
+
+
+class TaskThread(Thread):
+    "Thread executing tasks from a given tasks queue"
+    def __init__(self, pool):
+        Thread.__init__(self)
+        self.pool = pool
+        self.daemon = True
+        self.start()
+
+    def run(self):
+        while True:
+            if self.pool.abort:
+                break
+            task = self.pool.get_task()
+            try:
+                if task is None:
+                    break
+                task.activate()
+                self.pool.add_result(task)
+            except Exception:
+                # shouldn't happen, but just in case...
+                self.pool.add_result(sys.exc_info())
+            finally:
+                self.pool.task_done()
+
+
+
+class Task(object):
+    "Light-weight task proxy used by TaskPool"
+
+    def __init__(self, func, *args, **kwds):
+        self.pending = True
+        self.func = func
+        self.args = args
+        self.kwds = kwds
+        self.result = None
+        self.error = None
+
+    def __call__(self):
+        "Return result, running if necessary"
+        if self.pending:
+            self.activate()
+        if self.error is not None:
+            cls, exc, tb = self.error
+            raise cls, exc, tb
+        else:
+            return self.result
+
+    def __repr__(self):
+        return 'Task(%r)' % (
+                    self.func,
+                    # ', '.join(self.args),
+                    # ', '.join(['%s=%s' % (k, v) for k, v in self.kwds.items()]),
+                    )
+
+    def activate(self):
+        "Run task and save result"
+        try:
+            self.result = self.func(*self.args, **self.kwds)
+        except:
+            self.error = sys.exc_info()
+        self.pending = False
+
+
+
+class UnableToContact(Exception):
+    pass
+
+
+class CreateFailure(Exception):
+    pass
+
+
+class UpdateFailure(Exception):
+    pass
+
+
+class ScriptError(Exception):
+    pass
+
+class IDEnum(MultiValueEnum):
+    "primary value should be the id of the matching record"
+
+
+class Status(MultiValueEnum):
+    _order_ = 'great good warning danger offline'
+    great = 0, 'Great'
+    good = 1, 'Good'
+    warning = 2, 'Warning'
+    danger = 3, 'Fix!'
+    offline = 4, 'Off-line'
+    def __le__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        else:
+            return self.value <= other.value
+    def __lt__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        else:
+            return self.value < other.value
+    def __gt__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        else:
+            return self.value > other.value
+    def __ge__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        else:
+            return self.value >= other.value
+
+
+class Formatter(logging.Formatter):
+    def format(self, record):
+        record.pid = os.getpid()
+        return logging.Formatter.format(self, record)
+
+
+def display_errors(errors):
+    # errors = {
+    #           'by_command': {
+    #                          'command1': [ip1, ip2, ...],
+    #                          'command2': [ip1, ip5, ...],
+    #                          },
+    #           'by_ip': {
+    #                     ip1: {
+    #                           output-a: ['command1', 'command3'],
+    #                           output-b: ['command2'],
+    #                           },
+    #                     ip2: {
+    #                           output-c: ['command1'],
+    #                           },
+    #                     ip5: {
+    #                           output-d: ['command2'],
+    #                           },
+    #                     },
+    #            }
+    if errors:
+        for command, ips in sorted(errors.get('by_command', {}).items()):
+            error('='*15)
+            if len(ips) == 1:
+                error('%s: %s' % (command, ips[0]))
+            else:
+                error('%s:' % (command, ))
+                error('   ' + '\n   '.join([str(ip) for ip in ips]))
+        if errors.get('by_command') and errors.get('by_ip'):
+            error('='*15)
+        for ip, outputs in sorted(errors.get('by_ip', {}).items()):
+            error('='*15, ip, '-'*15, sep='\n')
+            text = []
+            for output, commands in outputs.items():
+                output = output.replace('\n', '\n   |    ')
+                names = '\n   | '.join([c for c in sorted(commands)])
+                text.append('   | %s\n   |    %s' % (names, output))
+            error('\n   |--------------------------------------------------------\n'.join(text))
+
+stdout_settings = termios.tcgetattr(sys.stdout)
+try:
+    Main()
+finally:
+    termios.tcsetattr(sys.stdout, termios.TCSADRAIN, stdout_settings)

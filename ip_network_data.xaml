@@ -1,0 +1,263 @@
+!!! xml1.0
+
+-types = 'ip_network.device.type'
+-tests = 'ip_network.extra.command'
+-fields = 'ip_network.extra.field'
+
+~openerp
+    ~data noupdate='1'
+
+        // device types
+
+        ~record #ip_network_device_type_camera model=types
+            @name: Camera
+            @short_name: camera
+            @description: For keeping an eye on things
+            @sequence eval='1'
+            @test
+                :cdata-python
+                    80 in ports and len(ports) == 1
+
+        ~record #ip_network_device_type_server model=types
+            @name: Server
+            @short_name: server
+            @description: Primarily used by software
+            @sequence eval='2'
+            @test
+                :cdata-python
+                    set([21, 25, 53, 80, 143, 443, 465, 993, 8069]) & ports
+
+        ~record #ip_network_device_type_workstation model=types
+            @name: Workstation
+            @short_name: workstation
+            @description: Primarily used by humans
+            @sequence eval='3'
+            @test
+                :cdata-python
+                    22 in ports
+
+        ~record #ip_network_device_type_printer model=types
+            @name: Printer / Scanner / Fax
+            @short_name: printer
+            @description: Any single- or multi- function combination
+            @sequence eval='4'
+            @test
+                :cdata-python
+                    set([515, 631, 9100]) & ports
+
+        ~record #ip_network_device_type_ms_pc model=types
+            @name: Microsoft PC
+            @short_name: ms-pc
+            @description: Primarily used by humans
+            @sequence eval='5'
+            @test
+                :cdata-python
+                    135 in ports
+
+        ~record #ip_network_device_type_ms_server model=types
+            @name: Microsoft Server
+            @short_name: ms-server
+            @description: Primarily used by software
+            @sequence eval='6'
+            @test
+                :cdata-python
+                    3389 in ports
+
+        ~record #ip_network_device_type_unknown model=types
+            @name: Unknown
+            @short_name: unknown
+            @description: Not specified
+            @sequence eval='7'
+
+        ~record #ip_network_device_type_controller model=types
+            @name: Controller
+            @short_name: controller
+            @description: non-linux/non-MS hardware
+            @sequence eval='8'
+
+        // Commands
+
+        ~record #ip_network_command_portscan model=tests
+            @name: Network Search
+            @sequence: 1
+            @where: local
+            @command: /usr/bin/nmap %(ip)s
+            @script
+                :cdata-python
+                    result['portscan'] = {'status': Status.offline}
+                    lines = [l.strip() for l in text.split('\n') if l.strip()]
+                    if lines[-1].startswith('Nmap done'):
+                        lines.pop()
+                    if lines and lines[0].startswith('Starting'):
+                        lines.pop(0)
+                    while lines and not lines[0].startswith(('Nmap scan', 'Interesting ports')):
+                        lines.pop(0)
+                    if lines:
+                        ip_name, ip_addr = lines.pop(0).split()[-2:]
+                        if ip_addr[0:1] == '(':
+                            ip_addr = ip_addr[1:-1]
+                        else:
+                            ip_name = False
+                        if ip_name == 'on':
+                            ip_name = False
+                        while lines and lines[0].startswith(('Starting', 'Nmap', 'Host', 'Not')):
+                            lines.pop(0)
+                        try:
+                            ip_addr
+                        except NameError:
+                            # refresh button: unable to talk to target machine
+                            pass
+                        else:
+                            lines[0] = lines[0].upper()
+                            result['ip_addr'] = {'value': ip_addr}
+                            result['portscan'] = {'value': '\n'.join(lines)}
+                            if ip_name:
+                                result['ip_name'] = {'value': ip_name}
+                            ports = set()
+                            for entry in lines[1:]:
+                                if '/' in entry:
+                                    number, _ = entry.split('/', 1)
+                                    ports.add(int(number))
+                                elif 'MAC Address' in entry:
+                                    pass
+                                else:
+                                    print('OOPS:  %r' % (entry, ))
+                            if 22 in ports:
+                                result['sshable'] = {'value': True}
+                            else:
+                                result['sshable'] = {'value': False}
+                            result['type_id'] = {'value': device_type(ports)}
+                            result['portscan']['status'] = Status.great
+                            if not ports:
+                                result['portscan']['status'] = Status.danger
+
+        ~record #ip_network_command_disks model=tests
+            @name: Disk Health
+            @where: ssh
+            @run_for_ids eval="[(6, 0, [ref('ip_network_device_type_workstation'), ref('ip_network_device_type_server')])]"
+            @command: df -h
+            @script
+                :cdata-python
+                    result['disks'] = {'value': text}
+                    status = Status.great
+                    last_segment = ''
+                    good_lines = []
+                    for line in text.split('\n'):
+                        if last_segment:
+                            line = last_segment + line
+                            last_segment = ''
+                        if line.startswith('/') and not line.startswith(('//', '/usr/bin/df')):
+                            good_lines.append(line)
+                            if ' ' not in line:
+                                last_segment = line
+                                continue
+                            mnt, total, used, avail, percent, point = line.split()
+                            percent = int(percent.strip('%'))
+                            if percent > 95:
+                                status = Status.danger
+                            elif percent > 80:
+                                status = max(status, Status.warning)
+                            elif percent > 70:
+                                status = max(status, Status.good)
+                    result['disks']['status'] = status
+                    result['disks']['value'] = '\n'.join(good_lines)
+
+        ~record #ip_network_command_hostname model=tests
+            @name: Host Name
+            @sequence: 20
+            @run_for_ids eval="[(6, 0, [ref('ip_network_device_type_workstation'), ref('ip_network_device_type_server')])]"
+            @where: ssh
+            @command: /bin/hostname
+            @script
+                :cdata-python
+                    result['hostname'] = {'value': text}                    
+
+        ~record #ip_network_command_macaddr model=tests
+            @name: MAC Address
+            @where: local
+            @run_for_ids eval="[(6, 0, [ref('ip_network_device_type_workstation'), ref('ip_network_device_type_server')])]"
+            @command: /usr/sbin/arp %(ip)s
+            @script
+                :cdata-python
+                    mac_addr = text.split('\n')[-1].split()[2]
+                    if mac_addr == '--':
+                        cmd = Execute('ip addr')
+                        if cmd.returncode == 0:
+                            lines = cmd.stdout.strip().split('\n')
+                            mode = 'search'
+                            for line in lines:
+                                if mode == 'search' and line[0:1] == ' ':
+                                    continue
+                                elif mode == 'search':
+                                    mode = 'first'
+                                elif mode == 'first':
+                                    mac_addr = line.split()[1]
+                                    mode = 'second'
+                                elif mode == 'second':
+                                    typ, net, _, ip = line.split(' ', 3)
+                                    if ip == ip_addr:
+                                        break
+                                    mode = 'search'
+                    result['mac_address'] = {'value': mac_addr}
+
+        ~record #ip_network_command_ssh_key model=tests
+            @name: SSH Key
+            @sequence: 90
+            @where: local
+            @command: /usr/bin/ssh-keygen -lv -f /home/openerp/.ssh/known_hosts
+            @script
+                :cdata-python
+                    for block in Blocks(text, 12):
+                        _, hash, ip, _ = block[0].split()
+                        ip = ip.split(',')[-1]
+                        if ip == ip_addr:
+                            ascii_art = '\n'.join(block[1:])
+                            result['ssh_key'] = {'value': '%s\n\n%s' % (hash, ascii_art)}
+
+        // test fields
+
+        ~record #ip_network_extra_field_portscan model=fields
+            @string: Open Ports
+            @name: portscan
+            @type: text
+            @command_id ref='ip_network.ip_network_command_portscan'
+
+        ~record #ip_network_extra_field_ssh_able model=fields
+            @string: SSH Availability
+            @name: sshable
+            @type: boolean
+            @command_id ref='ip_network.ip_network_command_portscan'
+
+        ~record #ip_network_extra_field_ip_name model=fields
+            @string: IP Name
+            @name: ip_name
+            @type: char
+            @size: 32
+            @command_id ref='ip_network.ip_network_command_portscan'
+
+        ~record #ip_network_extra_field_hostname model=fields
+            @string: Host Name
+            @name: hostname
+            @type: char
+            @size: 32
+            @command_id ref='ip_network.ip_network_command_hostname'
+
+        ~record #ip_network_extra_field_mac_addr model=fields
+            @string: Mac Address
+            @name: mac_address
+            @type: char
+            @size: 32
+            @command_id ref='ip_network.ip_network_command_macaddr'
+
+        ~record #ip_network_extra_field_ssh_key model=fields
+            @string: SSH Key
+            @name: ssh_key
+            @type: text
+            @command_id ref='ip_network.ip_network_command_ssh_key'
+
+        ~record #ip_network_extra_field_disks model=fields
+            @string: Disk Health
+            @name: disks
+            @type: text
+            @command_id ref='ip_network.ip_network_command_disks'
+

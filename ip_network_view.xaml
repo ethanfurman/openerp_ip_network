@@ -1,0 +1,266 @@
+!!! coding: utf-8
+!!! xml1.0
+
+-view = 'ir.ui.view'
+-action = 'ir.actions.act_window'
+-network = 'ip_network.network'
+-device = 'ip_network.device'
+-device_type = 'ip_network.device.type'
+-field = 'ip_network.extra.field'
+-command = 'ip_network.extra.command'
+-apm_user = 'group_ip_network'
+
+~openerp
+    ~data
+
+        // menus
+
+        ~menuitem name='Information Technology' #menu_ip_network_it groups=apm_user parent='base.menu_reporting'
+
+        ~menuitem @Network #menu_ip_network groups=apm_user parent='menu_ip_network_it'
+
+        ~menuitem @Configuration #menu_ip_network_conf parent='menu_ip_network_it' sequence='90'
+
+
+        // networks
+
+        ~record model=view #view_ip_network_tree
+            @name: ip_network.network.tree
+            @model: = network
+            @arch type='xml'
+                ~tree $IP_Map_Networks
+                    @name
+                    @network
+
+        ~record model=view #view_ip_network_form
+            @name: ip_network.network.form
+            @model: = network
+            @arch type='xml'
+                ~form $IP_Map_Networks version='7.0'
+                    ~group
+                        ~group
+                            @name
+                            @network
+                        ~group
+                            @description
+
+        ~record model=action #action_ip_network
+            @name: IP Networks
+            @res_model: = network
+            @view_type: form
+            @view_id ref='view_ip_network_tree'
+            @view_mode: tree,form
+
+        ~menuitem @Networks #menu_ip_network_network parent='menu_ip_network' action='action_ip_network'
+
+
+        // devices
+
+        ~record model=view #view_ip_network_device_tree
+            @name: ip_network.device.tree
+            @model: = device
+            @arch type='xml'
+                ~tree $IP_Map_Devices
+                    @ip_addr
+                    @name
+                    @type_id
+                    @status
+
+        ~record model=view #view_ip_network_device_form
+            @name: ip_network.device.form
+            @model: = device
+            @arch type='xml'
+                ~form $IP_Map_Devices version='7.0'
+                    ~group
+                        ~group
+                            @name
+                            @ip_addr
+                            @type_id
+                            @last_comms
+                        ~group
+                            @image_small widget='image' class='oe_image oe_right' nolabel='1' attrs="{'readonly':True}"
+                            ~div
+                                ~button $Refresh @update_status type='object'
+                                @status attrs="{'readonly':True}"
+                                @clues attrs="{'readonly':True}"
+                    ~group @short_fields
+                    ~notebook @notebook_fields
+
+        ~record model=view #view_ip_network_device_kanban
+            @name: ip_network.device.kanban
+            @model: = device
+            @arch type='xml'
+                ~kanban version='7.0' .oe_background_grey create='false'
+                    @status
+                    @ip_addr
+                    @image_small
+                    ~templates
+                        ~t t-name='kanban-box' t-attf-class='base #{cls}'
+                            ~div class='.oe_kanban_box_content oe_kanban_global_click'
+                                ~img t-att-src="kanban_image('ip_network.device', 'image_small', record.id.value)" .oe_kanban_image
+                                ~div
+                                    ~h4
+                                        @name
+                                        @ip_addr
+                                    ~button type='object' @update_status: Refresh
+
+        ~record model=action #action_ip_network_device
+            @name: IP Devices
+            @res_model: = device
+            @view_type: form
+            @view_id ref='view_ip_network_device_tree'
+            @view_mode: tree,form,kanban
+
+        ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='10'
+
+
+        // device types
+
+        ~record model=view #view_ip_network_device_type_tree
+            @name: ip_network.device.type.tree
+            @model: = device_type
+            @arch type='xml'
+                ~tree $Device_Types
+                    @name
+                    @test
+                    @short_name
+                    @sequence invisible='1'
+
+        ~record model=view #view_ip_network_device_type_form
+            @name: ip_network.device.type.form
+            @model: = device_type
+            @arch type='xml'
+                ~form $Device_Types version='7.0'
+                    ~group
+                        ~group
+                            @name
+                            @test
+                        ~group
+                            @short_name
+                    ~label for='description' $Description
+                    @description nolabel='1'
+
+        ~record model=action #action_ip_network_device_type
+            @name: IP Device Types
+            @res_model: = device_type
+            @view_type: form
+            @view_id ref='view_ip_network_device_type_tree'
+            @view_mode: tree,form
+
+        ~menuitem @Types #menu_ip_network_conf_device_type parent='menu_ip_network_conf' action='action_ip_network_device_type'
+
+
+        // commands
+
+        ~record model=view #view_ip_network_command_tree
+            @name: ip_network.extra.command.tree
+            @model: = command
+            @arch type='xml'
+                ~tree $IP_Map_Commands
+                    @name
+                    @where
+                    @sequence
+                    @active
+
+        ~record model=view #view_ip_network_command_form
+            @name: ip_network.extra.command.form
+            @model: = command
+            @arch type='xml'
+                ~form $IP_Map_Commands version='7.0'
+                    ~group
+                        ~group
+                            @id invisible='1'
+                            @active
+                            @name attrs="{'readonly':[('id','!=',False)]}"
+                            @where
+                            @field_ids
+                                ~tree
+                                    @name
+                                    @string
+                                    @type
+                                    @size attrs="{'invisible':[('type','!=','char')]}"
+                        ~group
+                            @sequence
+                            @run_for_ids
+                    ~separator
+                    ~group
+                        @description
+                    ~separator
+                    ~group
+                        @command $Command attrs="{'invisible':[('where','=','user')]}" .oe_monospace
+                        ~label for='script' $Python_Script attrs="{'invisible':[('where','=','user')]}"
+                        @script nolabel='1' attrs="{'invisible':[('where','=','user')]}" .oe_monospace
+
+        ~record model=action #action_ip_network_command
+            @name: IP Field Commands
+            @res_model: = command
+            @view_type: form
+            @view_id ref='view_ip_network_command_tree'
+            @view_mode: tree,form
+            @domain: ['|',('active','=',True),('active','=',False)]
+
+        ~menuitem @Commands #menu_ip_network_conf_command parent='menu_ip_network_conf' action='action_ip_network_command'
+
+
+        // fields
+
+        ~record model=view #view_ip_network_extra_field_tree
+            @name: ip_network.extra.field.tree
+            @model: = field
+            @arch type='xml'
+                ~tree $Fields edit='0' create='0' delete='0'
+                    @name
+                    @string
+                    @type
+                    @size attrs="{'invisible':[('type','!=','char')]}"
+                    @command_run_for_ids
+
+        ~record model=view #view_ip_network_extra_field_form
+            @name: ip_network.extra.field.form
+            @model: = field
+            @arch type='xml'
+                ~form $Fields edit='0' create='0' delete='0' version='7.0'
+                    ~group
+                        ~group
+                            @name
+                            @type
+                            @size attrs="{'invisible':[('type','!=','char')]}"
+                        ~group
+                            @string
+                            @notes
+
+        ~record model=action #action_ip_network_field
+            @name: Device Fields
+            @res_model: = field
+            @view_type: form
+            @view_id ref='view_ip_network_extra_field_tree'
+            @view_mode: tree,form
+
+        ~menuitem @Fields #menu_ip_network_conf_field parent='menu_ip_network_conf' action='action_ip_network_field'
+
+        // this pc
+
+        ~record model=action #action_ip_network_device_self
+            @name: This PC
+            @res_model: = device
+            @view_type: form
+            @view_id ref='view_ip_network_device_kanban'
+            @view_mode: kanban,form
+            @domain: [('ip_addr','=','THIS_PC')]
+            @help type='html'
+                ~p .oe_view_nocontent
+                    This PC is not being tracked.
+
+        ~menuitem name='This PC' #menu_ip_network_device_self parent='mail.messaging_miscellany' action='action_ip_network_device_self' sequence='10'
+
+    ~data noupdate='1'
+
+        // dynamic view
+
+        ~record model=view #view_ip_network_device_dynamic_form
+            @name: ip_network.device.dynamic.form
+            @model: = device
+            @inherit_id ref='view_ip_network_device_form'
+            @arch type='xml'
+                ~group @short_fields position='inside'
+                    temp text

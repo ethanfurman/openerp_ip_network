@@ -85,6 +85,8 @@
                                 @clues attrs="{'readonly':True}"
                     ~group @short_fields
                     ~notebook @notebook_fields
+                        ~page $Errors attrs="{'invisible': [('errors','=',False)]}"
+                            @errors
 
         ~record model=view #view_ip_network_device_kanban
             @name: ip_network.device.kanban
@@ -110,6 +112,7 @@
             @view_type: form
             @view_id ref='view_ip_network_device_tree'
             @view_mode: tree,form,kanban
+            @limit: 4096
 
         ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='10'
 

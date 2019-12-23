@@ -14,6 +14,7 @@ from xaml import Xaml
 import images
 import logging
 import openerp
+import os
 import pwd
 import textwrap
 import threading
@@ -24,6 +25,7 @@ _logger = logging.getLogger(__name__)
 config_file = Path('/%s/fnx.ini' % CONFIG_DIR)
 known_hosts = Path(pwd.getpwnam('openerp')[5]) / '.ssh/known_hosts'
 query_script = Path('/opt/bin/ip_network_query')
+virtual_env = os.environ.get('VIRTUAL_ENV')
 
 class FieldType(fields.SelectionEnum):
     _order_ = 'boolean char date datetime float html integer other text time'
@@ -52,12 +54,14 @@ class TestWhere(fields.SelectionEnum):
     user = 'User Entry'
 
 class DeviceStatus(fields.SelectionEnum):
-    _order_ = 'great good warning danger offline'
+    _order_ = 'online great good warning danger offline unknown'
+    online = 'On-line'
     great = 'Great'
     good = 'Good'
     warning = 'Warning'
     danger = 'Fix!'
     offline = 'Off-line'
+    unknown = 'Unknown (tar-pit?)'
 
 # Tables
 
@@ -242,7 +246,7 @@ class device(osv.Model):
                  raise ERPError('bad ip address', 'ip address should be a dotted quad [got %r]' % (ip_addr, ))
             try:
                 quads = [int(q) for q in quads]
-                if not all([0 <= q < 255 for q in quads]):
+                if not all([0 <= q <= 255 for q in quads]):
                     raise ValueError
             except ValueError:
                 raise ERPError('bad ip address', 'quad values should be between 0 - 255 [got %r]' % (ip_addr, ))
@@ -255,9 +259,9 @@ class device(osv.Model):
         if isinstance(ids, (int, long)):
             ids = [ids]
         ips = ','.join([d['ip_addr'] for d in self.read(cr, uid, ids, context=context)])
-        result = Execute('%s for-openerp --networks %s --scan-timeout 90' % (query_script, ips), pty=True, password=config.openerp.pw)
+        result = Execute('sudo VIRTUAL_ENV=%s %s for-openerp %s/32 --scan-timeout 180' % (virtual_env, query_script, ips), pty=True, password=config.openerp.pw)
         if result.returncode or result.stderr:
-            _logger.error('ip_map update of %s failed with %r' % (ips, result.stderr.strip() or result.returncode))
+            _logger.error('ip_network update of %s failed with %r' % (ips, result.stderr.strip() or result.returncode))
             message = ['===================\n', 'return code: %s' % result.returncode]
             if result.stderr.strip():
                 message.append('--- stderr ---')
@@ -282,6 +286,7 @@ class device(osv.Model):
         'status': fields.selection(DeviceStatus, 'Status'),
         'last_comms': fields.datetime('Last Communication'),
         'clues': fields.text('Problem areas'),
+        'errors': fields.text('Errors encountered'),
         # image: all image fields are base64 encoded and PIL-supported
         'image': fields.function(
             _get_image,
@@ -647,17 +652,12 @@ def fix_field_name(name):
     return _lower(name)
 
 DEVICE_STATUS = {
-    0: 'great',
-    1: 'good',
-    2: 'warning',
-    3: 'danger',
-    4: 'offline',
-    'perfect':  'green',    # deprecated
     'great':    'green',
     'good':     'green',
+    'online':   'yellow',
     'warning':  'yellow',
     'danger':   'red',
-    'siren':    'red',  # deprecated
+    'unknown':  'red',
     'offline':  'black',
     }
 

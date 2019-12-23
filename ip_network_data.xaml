@@ -47,7 +47,7 @@
 
         ~record #ip_network_device_type_ms_pc model=types
             @name: Microsoft PC
-            @short_name: ms-pc
+            @short_name: ms_pc
             @description: Primarily used by humans
             @sequence eval='5'
             @test
@@ -56,7 +56,7 @@
 
         ~record #ip_network_device_type_ms_server model=types
             @name: Microsoft Server
-            @short_name: ms-server
+            @short_name: ms_server
             @description: Primarily used by software
             @sequence eval='6'
             @test
@@ -72,8 +72,14 @@
         ~record #ip_network_device_type_controller model=types
             @name: Controller
             @short_name: controller
-            @description: non-linux/non-MS hardware
+            @description: non-linux/non-ms hardware
             @sequence eval='8'
+
+        ~record #ip_network_device_type_tarpit model=types
+            @name: Tar Pit
+            @short_name: tarpit
+            @description: traps incoming queries for long periods of time
+            @sequence eval='9'
 
         // Commands
 

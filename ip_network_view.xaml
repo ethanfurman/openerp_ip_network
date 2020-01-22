@@ -87,6 +87,8 @@
                     ~notebook @notebook_fields
                         ~page $Errors attrs="{'invisible': [('errors','=',False)]}"
                             @errors
+                        ~page $Misc_Files @misc_files
+                            @device_files
 
         ~record model=view #view_ip_network_device_kanban
             @name: ip_network.device.kanban

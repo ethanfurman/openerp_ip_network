@@ -2,6 +2,7 @@
 from antipathy import Path
 from dbf import Time
 from VSS.utils import translator
+from fnx_fs.fields import files
 from fnx.oe import Normalize
 from openerp import CONFIG_DIR, SUPERUSER_ID
 from openerp.osv.orm import except_orm as ValidateError
@@ -99,6 +100,9 @@ class device(osv.Model):
     _name = 'ip_network.device'
     _rec_name = 'ip_addr'
     _order = 'ip_addr_as_int asc'
+    _inherit = 'fnx_fs.fs'
+
+    _fnxfs_path = 'ip_network'
 
     def __init__(self, pool, cr):
         'read extra_test table and add found records to this table'
@@ -309,6 +313,7 @@ class device(osv.Model):
             multi='image',
             help="This field holds the image used as visual aid to pc status",
             ),
+        'device_files': files('device', string='Miscellaneous Files'),
         }
 
     _sql_constraints = [
@@ -694,7 +699,7 @@ dynamic_devices = (
                         ~field name=field.name
 
     -if args.long_fields:
-        ~notebook @notebook_fields position='inside'
+        ~page @misc_files position='before'
             -for field in args.long_fields:
                 -if field.command_run_for_ids:
                     -visible_types = "{'invisible':[('type_id','not in',[" + ','.join([str(i.id) for i in field.command_run_for_ids]) + "])]}"

@@ -100,13 +100,32 @@
                     @image_small
                     ~templates
                         ~t t-name='kanban-box' t-attf-class='base #{cls}'
-                            ~div class='.oe_kanban_box_content oe_kanban_global_click'
-                                ~img t-att-src="kanban_image('ip_network.device', 'image_small', record.id.value)" .oe_kanban_image
-                                ~div
-                                    ~h4
-                                        @name
-                                        @ip_addr
-                                    ~button type='object' @update_status: Refresh
+                            ~div .oe_kanban_global_click style='border-style: solid'
+                                ~a type='open'
+                                    ~img t-att-src="kanban_image('ip_network.device', 'image_small', record.id.value )" .oe_avatar .oe_kanban_avatar_smallbox
+                                ~div .oe_module_desc
+                                    ~div .oe_kanban_box_content
+                                        ~table .oe_kanban_table
+                                            ~tr
+                                                ~td .oe_kanban_title1
+                                                    ~h4
+                                                        @ip_addr
+                                                ~td
+                                                    ~b
+                                                        @name .oe_oneline
+                                            ~tr
+                                                ~td
+                                                    @type_id
+                                                ~td
+                                                    @hostname
+                                            ~tr
+                                                ~td
+                                                    ~div
+                                                        @last_comms
+                                                    ~div
+                                                        @clues
+                                ~button type='object' @update_status .oe_avatar .oe_kanban_avatar_smallbox
+                                    ~img src='/web/static/src/img/icons/gtk-refresh.png'
 
         ~record model=action #action_ip_network_device
             @name: IP Devices

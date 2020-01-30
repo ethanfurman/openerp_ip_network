@@ -89,6 +89,8 @@
                             @errors
                         ~page $Misc_Files @misc_files
                             @device_files
+                        ~page $WS_Scripts
+                            @ws_scripts
 
         ~record model=view #view_ip_network_device_kanban
             @name: ip_network.device.kanban

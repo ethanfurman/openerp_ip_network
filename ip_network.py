@@ -23,10 +23,11 @@ import traceback
 
 # config
 _logger = logging.getLogger(__name__)
-config_file = Path('/%s/fnx.ini' % CONFIG_DIR)
-known_hosts = Path(pwd.getpwnam('openerp')[5]) / '.ssh/known_hosts'
-query_script = Path('/opt/bin/ip_network_query')
-virtual_env = os.environ.get('VIRTUAL_ENV')
+CONFIG_FILE = Path('/%s/fnx.ini' % CONFIG_DIR)
+KNOWN_HOSTS = Path(pwd.getpwnam('openerp')[5]) / '.ssh/known_hosts'
+QUERY_SCRIPT = Path('/opt/bin/ip_network_query')
+VIRTUAL_ENV = Path(os.environ.get('VIRTUAL_ENV'))
+WS_SCRIPT_LOCATION = VIRTUAL_ENV / 'ws' /'bin'
 
 class FieldType(fields.SelectionEnum):
     _order_ = 'boolean char date datetime float html integer other text time'
@@ -63,6 +64,23 @@ class DeviceStatus(fields.SelectionEnum):
     danger = 'Fix!'
     offline = 'Off-line'
     unknown = 'Unknown (tar-pit?)'
+
+class CMDict(dict):
+    "use a dict in a context manager for thread safety"
+    # adapted from https://stackoverflow.com/a/29532297
+    #
+    def __init__(self, *arg, **kwds) :
+        dict.__init__(self, *arg, **kwds)
+        self._lock = threading.Lock()
+    #
+    def __enter__(self) :
+        self._lock.acquire()
+        return self
+    #
+    def __exit__(self, type, value, traceback) :
+        self._lock.release()
+
+WS_SCRIPTS = CMDict()
 
 # Tables
 
@@ -259,11 +277,11 @@ class device(osv.Model):
         return res
 
     def update_status(self, cr, uid, ids, context=None):
-        config = OrmFile(config_file)
+        config = OrmFile(CONFIG_FILE)
         if isinstance(ids, (int, long)):
             ids = [ids]
         ips = ','.join([d['ip_addr'] for d in self.read(cr, uid, ids, context=context)])
-        result = Execute('sudo VIRTUAL_ENV=%s %s for-openerp %s/32 --scan-timeout 180' % (virtual_env, query_script, ips), pty=True, password=config.openerp.pw)
+        result = Execute('sudo VIRTUAL_ENV=%s %s for-openerp %s/32 --scan-timeout 180' % (VIRTUAL_ENV, QUERY_SCRIPT, ips), pty=True, password=config.openerp.pw)
         if result.returncode or result.stderr:
             _logger.error('ip_network update of %s failed with %r' % (ips, result.stderr.strip() or result.returncode))
             message = ['===================\n', 'return code: %s' % result.returncode]
@@ -273,6 +291,14 @@ class device(osv.Model):
             _logger.error('\n' + '\n'.join(message) + '\n')
             raise ERPError('Update Failed', result.stderr.strip())
         return {'type':'ir.actions.client', 'tag':'reload'}
+
+    def _get_scripts(self, cr, uid, ids, field_name, arg, context):
+        res = {}
+        # get scripts
+        scripts = get_scripts()
+        doc = Xaml(dynamic_devices).document.pages[0]
+        for device_rec in self.read(cr, uid, ids, fields=['id'], context=context):
+
 
     _columns = {
         'name': fields.char('Name', size=64),
@@ -314,6 +340,12 @@ class device(osv.Model):
             help="This field holds the image used as visual aid to pc status",
             ),
         'device_files': files('device', string='Miscellaneous Files'),
+        'ws_scripts': fields.function(
+            _get_scripts,
+            type='html',
+            string='Workstation Scripts',
+            help='scripts that will be run on remote workstations',
+            ),
         }
 
     _sql_constraints = [
@@ -555,6 +587,21 @@ class field(osv.Model):
         return result
 
 
+class remote_scripts(osv.Model):
+    "scripts for execution on remote machine"
+    #
+    _name = 'ip_network.device.script'
+
+    _columns = {
+        'name': fields.char('Name', size=64),
+        'active': fields.boolean('Active'),
+        'filename': fields.char('File name', size=256),
+        'shebang': fields.char('Shebang', size=128),
+        'user_runnable': fields.boolean('User script'),
+        'script': fields.text('Script'),
+        }
+
+
 # utilities
 def field_to_dict(command):
     f_type = command.type
@@ -656,6 +703,73 @@ def fix_field_name(name):
     name = name.replace('<=', '_le_').replace('>=', '_ge_').replace('<', '_lt_').replace('&', '_and_').replace('>', '_gt').replace('=', '_eq_').replace('!=', '_ne_')
     return _lower(name)
 
+def get_scripts():
+    match = Match()
+    with WS_SCRIPTS as ws:
+        for script in WS_SCRIPT_LOCATION.glob('*'):
+            info = ws.setdefault(script, {
+                    'shebang': None,
+                    'name': None,
+                    'user_runnnable': None,
+                    'text': None,
+                    })
+            if info['m_time'] != script.stat().st_mtime:
+                # something may have changed, update entry
+                #
+                # shebang
+                # name in OpenERP
+                # runnable by users
+                # script (without above meta)
+                # m_time
+                #
+                shebang = None
+                script_oerp_name = None
+                user_runnable = False
+                text = []
+                with info.open() as i:
+                    data = i.read().split('\n')
+                if line.startswith('#!'):
+                    if info['shebang'] is not None:
+                        _logger.warning('%r has multiple shebang lines')
+                    else:
+                        info['shebang'] = line
+                    text.append(line)
+                elif match('#\s?OERP.?NAME:\s*(.*)$', line, re.I):
+                    if info['name'] is not None:
+                        _logger.warning("%r has multiple `#OERP NAME` entries" % script)
+                    else:
+                        info['name'], = match().groups()
+                elif match('#\s?OERP.?USER.?RUNNABLE:\s*(.*)$', line, re.I):
+                    if info['user_runnable'] is not None:
+                        _logger.warning("%r has multiple `#OERP USER RUNNABLE` entries" % script)
+                    else:
+                        info['user_runnable'], = match().groups()
+                else:
+                    # pass all other lines through
+                    text.append(line)
+                info['text'] = '\n'.join(text)
+                # script processed
+        # return copy of global dict
+        return WS_SCRIPTS.copy()
+
+
+_Match_Sentinal = object()
+class Match(object):
+    #
+    def __init__():
+        self._data = _Match_Sentinal
+    #
+    def __call__(*args, ):
+        if not args and self._data is _Match_Sentinal:
+            raise ValueError('nothing saved in var')
+        elif not args:
+            return self._data
+        else:
+            # run re.match
+            self._data = re.match(*args)
+            return self._data
+
+
 DEVICE_STATUS = {
     'great':    'green',
     'good':     'green',
@@ -712,3 +826,10 @@ dynamic_devices = (
                             ~field name=field.name nolabel='1' options="{'no_embed': True}"
 """
 )
+
+ws_scripts = (
+"""\
+!!! html
+
+    -for shebang, name, as_user, script in args.scripts:
+"""

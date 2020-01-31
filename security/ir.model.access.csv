@@ -10,3 +10,6 @@ access_ip_network_device_type_manager,ip_network_device_type_manager,model_ip_ne
 access_ip_network_device_manager,ip_network_device_manager,model_ip_network_device,,1,1,1,1
 access_ip_network_extra_field_manager,ip_network_extra_field_manager,model_ip_network_extra_field,,1,1,1,1
 access_ip_network_extra_command_manager,ip_network_extra_command_manager,model_ip_network_extra_command,,1,1,1,1
+
+access_ip_network_device_script,access_ip_network_device_script,model_ip_network_device_script,,1,1,1,1
+

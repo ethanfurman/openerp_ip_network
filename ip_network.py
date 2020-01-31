@@ -7,7 +7,8 @@ from fnx.oe import Normalize
 from openerp import CONFIG_DIR, SUPERUSER_ID
 from openerp.osv.orm import except_orm as ValidateError
 from openerp.exceptions import ERPError
-from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, self_ids
+from openerp import tools
+from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, self_ids, NamedLock
 from osv import orm, osv, fields
 from psycopg2 import ProgrammingError
 from scription import Execute, OrmFile
@@ -17,6 +18,7 @@ import logging
 import openerp
 import os
 import pwd
+import re
 import textwrap
 import threading
 import traceback
@@ -28,6 +30,9 @@ KNOWN_HOSTS = Path(pwd.getpwnam('openerp')[5]) / '.ssh/known_hosts'
 QUERY_SCRIPT = Path('/opt/bin/ip_network_query')
 VIRTUAL_ENV = Path(os.environ.get('VIRTUAL_ENV'))
 WS_SCRIPT_LOCATION = VIRTUAL_ENV / 'ws' /'bin'
+WS_SCRIPTS = {}
+
+NamedLock = NamedLock()
 
 class FieldType(fields.SelectionEnum):
     _order_ = 'boolean char date datetime float html integer other text time'
@@ -65,22 +70,6 @@ class DeviceStatus(fields.SelectionEnum):
     offline = 'Off-line'
     unknown = 'Unknown (tar-pit?)'
 
-class CMDict(dict):
-    "use a dict in a context manager for thread safety"
-    # adapted from https://stackoverflow.com/a/29532297
-    #
-    def __init__(self, *arg, **kwds) :
-        dict.__init__(self, *arg, **kwds)
-        self._lock = threading.Lock()
-    #
-    def __enter__(self) :
-        self._lock.acquire()
-        return self
-    #
-    def __exit__(self, type, value, traceback) :
-        self._lock.release()
-
-WS_SCRIPTS = CMDict()
 
 # Tables
 
@@ -293,12 +282,13 @@ class device(osv.Model):
         return {'type':'ir.actions.client', 'tag':'reload'}
 
     def _get_scripts(self, cr, uid, ids, field_name, arg, context):
-        res = {}
-        # get scripts
-        scripts = get_scripts()
-        doc = Xaml(dynamic_devices).document.pages[0]
-        for device_rec in self.read(cr, uid, ids, fields=['id'], context=context):
-
+        script_ids = self.pool.get('ip_network.device.script')._update_scripts(cr, uid, context=context)
+        res = dict(
+            (r['id'], script_ids)
+            for r in self.read(
+                cr, SUPERUSER_ID, [('id','!=',0)], fields=['id'], context={'active_test': False},
+                ))
+        return res
 
     _columns = {
         'name': fields.char('Name', size=64),
@@ -342,7 +332,8 @@ class device(osv.Model):
         'device_files': files('device', string='Miscellaneous Files'),
         'ws_scripts': fields.function(
             _get_scripts,
-            type='html',
+            type='many2many',
+            relation='ip_network.device.script',
             string='Workstation Scripts',
             help='scripts that will be run on remote workstations',
             ),
@@ -592,13 +583,88 @@ class remote_scripts(osv.Model):
     #
     _name = 'ip_network.device.script'
 
+    def _update_scripts(self, cr, uid, context=None):
+        current_scripts = get_scripts()
+        current_records = dict(
+            (r['filename'], r)
+            for r in self.read(cr, uid, [('id','!=',0)], context=context)
+            )
+        script_ids = [r['id'] for r in current_records.values()]
+        seen = set()
+        for filename, info in current_scripts.items():
+            seen.add(filename)
+            if info['updated']:
+                oe_rec = current_records.get(filename)
+                if oe_rec is None:
+                    # create missing record
+                    info = dict(
+                            (k, v)
+                            for k, v in info.items()
+                            if k not in ('updated', 'm_time')
+                            )
+                    script_ids.append(self.create(cr, SUPERUSER_ID, info))
+                    continue
+                changes = {}
+                for k, v in info.items():
+                    if k in ('updated', 'm_time', ):
+                        continue
+                    if v != oe_rec[k]:
+                        changes[k] = v
+                self.write(cr, SUPERUSER_ID, oe_rec['id'], changes, context=context)
+        return script_ids
+
+    def _get_image(self, cr, uid, ids, name, args, context=None):
+        result = dict.fromkeys(ids, False)
+        for obj in self.browse(cr, uid, ids, context=context):
+            result[obj.id] = tools.image_get_resized_images(obj.image)
+        return result
+
+    def _set_image(self, cr, uid, id, name, value, args, context=None):
+        return self.write(cr, uid, [id], {'image': tools.image_resize_image_big(value)}, context=context)
+
+    def _has_image(self, cr, uid, ids, name, args, context=None):
+        result = {}
+        for obj in self.browse(cr, uid, ids, context=context):
+            result[obj.id] = obj.image != False
+        return result
+
     _columns = {
         'name': fields.char('Name', size=64),
         'active': fields.boolean('Active'),
         'filename': fields.char('File name', size=256),
         'shebang': fields.char('Shebang', size=128),
-        'user_runnable': fields.boolean('User script'),
+        'run_by_user': fields.boolean('Run by user'),
+        'run_as_user': fields.boolean('Run as user'),
         'script': fields.text('Script'),
+        # image: all image fields are base64 encoded and PIL-supported
+        'image': fields.binary(
+                "Image",
+                help="This field holds the image used this script type, limited to 1024x1024px",
+                ),
+        'image_medium': fields.function(
+                _get_image,
+                fnct_inv=_set_image,
+                string="Medium-sized image", type="binary", multi="_get_image",
+                store={
+                    'res.partner': (lambda self, cr, uid, ids, c={}: ids, ['image'], 10),
+                    },
+                help="Medium-sized image of this contact. It is automatically "\
+                     "resized as a 128x128px image, with aspect ratio preserved. "\
+                     "Use this field in form views or some kanban views.",
+                     ),
+        'image_small': fields.function(
+                _get_image,
+                fnct_inv=_set_image,
+                string="Small-sized image", type="binary", multi="_get_image",
+                store={
+                    'res.partner': (lambda self, cr, uid, ids, c={}: ids, ['image'], 10),
+                    },
+                help="Small-sized image of this contact. It is automatically "\
+                     "resized as a 64x64px image, with aspect ratio preserved. "\
+                     "Use this field anywhere a small image is required.",
+                     ),
+        'has_image': fields.function(_has_image, type="boolean"),
+
         }
 
 
@@ -705,14 +771,22 @@ def fix_field_name(name):
 
 def get_scripts():
     match = Match()
-    with WS_SCRIPTS as ws:
+    with NamedLock('ip_network.device.script'):
+        seen = set()
         for script in WS_SCRIPT_LOCATION.glob('*'):
-            info = ws.setdefault(script, {
+            info = WS_SCRIPTS.setdefault(script, {
+                    'filename': script,
                     'shebang': None,
                     'name': None,
-                    'user_runnnable': None,
-                    'text': None,
+                    'run_by_user': False,
+                    'run_as_user': False,
+                    'script': None,
+                    'active': True,
+                    'updated': None,
+                    'm_time': 0,
                     })
+            info['updated'] = False
+            seen.add(script)
             if info['m_time'] != script.stat().st_mtime:
                 # something may have changed, update entry
                 #
@@ -722,33 +796,46 @@ def get_scripts():
                 # script (without above meta)
                 # m_time
                 #
-                shebang = None
-                script_oerp_name = None
-                user_runnable = False
+                info['updated'] = True
                 text = []
-                with info.open() as i:
+                with script.open() as i:
                     data = i.read().split('\n')
-                if line.startswith('#!'):
-                    if info['shebang'] is not None:
-                        _logger.warning('%r has multiple shebang lines')
+                for line in data:
+                    if line.startswith('#!'):
+                        if info['shebang'] is not None:
+                            _logger.warning('%r has multiple shebang lines', script)
+                        else:
+                            info['shebang'] = line
+                        text.append(line)
+                    elif match('#\s?OERP.?NAME:\s*(.*)$', line, re.I):
+                        if info['name'] is not None:
+                            _logger.warning("%r has multiple `#OERP NAME` entries", script)
+                        else:
+                            [info['name']] = match().groups()
+                    elif match('#\s?OERP.?RUN.?BY.?USER.?:\s*(.*)$', line, re.I):
+                        if info['run_by_user'] is not None:
+                            _logger.warning("%r has multiple `#OERP RUN BY USER` entries", script)
+                        else:
+                            [info['run_as_user']] = match().groups()
+                    elif match('#\s?OERP.?RUN.?AS.?USER.?:\s*(.*)$', line, re.I):
+                        if info['run_as_user'] is not None:
+                            _logger.warning("%r has multiple `#OERP RUN AS USER` entries", script)
+                        else:
+                            info['user_runnable'] = match().groups()[0].lower() in ('y', 'yes', 't', 'true')
+                    elif match('#\s?OERP.?ACTIVE:\s*(.*)$', line, re.I):
+                        if info['run_as_user'] is not None:
+                            _logger.warning("%r has multiple `#OERP ACTIVE` entries", script)
+                        else:
+                            info['user_runnable'] = match().groups()[0].lower() in ('y', 'yes', 't', 'true')
                     else:
-                        info['shebang'] = line
-                    text.append(line)
-                elif match('#\s?OERP.?NAME:\s*(.*)$', line, re.I):
-                    if info['name'] is not None:
-                        _logger.warning("%r has multiple `#OERP NAME` entries" % script)
-                    else:
-                        info['name'], = match().groups()
-                elif match('#\s?OERP.?USER.?RUNNABLE:\s*(.*)$', line, re.I):
-                    if info['user_runnable'] is not None:
-                        _logger.warning("%r has multiple `#OERP USER RUNNABLE` entries" % script)
-                    else:
-                        info['user_runnable'], = match().groups()
-                else:
-                    # pass all other lines through
-                    text.append(line)
-                info['text'] = '\n'.join(text)
+                        # pass all other lines through
+                        text.append(line)
+                info['script'] = '\n'.join(text)
                 # script processed
+            for name in WS_SCRIPTS:
+                if name not in seen:
+                    WS_SCRIPTS[name]['updated'] = True
+                    WS_SCRIPTS[name]['active'] = False
         # return copy of global dict
         return WS_SCRIPTS.copy()
 
@@ -756,10 +843,10 @@ def get_scripts():
 _Match_Sentinal = object()
 class Match(object):
     #
-    def __init__():
+    def __init__(self):
         self._data = _Match_Sentinal
     #
-    def __call__(*args, ):
+    def __call__(self, *args):
         if not args and self._data is _Match_Sentinal:
             raise ValueError('nothing saved in var')
         elif not args:
@@ -827,9 +914,3 @@ dynamic_devices = (
 """
 )
 
-ws_scripts = (
-"""\
-!!! html
-
-    -for shebang, name, as_user, script in args.scripts:
-"""

@@ -5,6 +5,7 @@
 -action = 'ir.actions.act_window'
 -network = 'ip_network.network'
 -device = 'ip_network.device'
+-device_script = 'ip_network.device.script'
 -device_type = 'ip_network.device.type'
 -field = 'ip_network.extra.field'
 -command = 'ip_network.extra.command'
@@ -138,6 +139,41 @@
             @limit: 4096
 
         ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='10'
+
+
+        // remote scripts
+
+        ~record model=view #view_ip_network_device_script_kanban
+            @name: ip_network.device.script.kanban
+            @model: = device_script
+            @arch type='xml'
+                ~kanban version='7.0' .oe_background_grey
+                    ~templates
+                        ~t t-name='kanban-box' t-attf-class='base #{cls}'
+                            ~div .oe_kanban_global_click style='border-style: solid'
+                                ~a type='open'
+                                    ~img t-att-src="kanban_image('ip_network.device.script', 'image_small', record.id.value )" .oe_avatar .oe_kanban_avatar_smallbox
+                                ~div .oe_module_desc
+                                    ~div .oe_kanban_box_content
+                                        ~table .oe_kanban_table
+                                            ~tr
+                                                ~td .oe_kanban_title1
+                                                    ~h4
+                                                        @name
+                                            ~tr
+                                                ~td
+                                                    @filename
+                                                ~td
+                                                    ~div t-if='record.run_by_user.raw_value': Run by: user
+                                                    ~div t-if='!record.run_by_user.raw_value': Run by: root
+                                            ~tr
+                                                ~td
+                                                    @shebang
+                                                ~td
+                                                    ~div t-if='record.run_as_user.raw_value': Run as: user
+                                                    ~div t-if='!record.run_as_user.raw_value': Run as: root
+                                ~button type='object' @update_scripts .oe_avatar .oe_kanban_avatar_smallbox
+                                    ~img src='/web/static/src/img/icons/gtk-refresh.png'
 
 
         // device types

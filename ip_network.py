@@ -332,7 +332,7 @@ class device(osv.Model):
         'device_files': files('device', string='Miscellaneous Files'),
         'ws_scripts': fields.function(
             _get_scripts,
-            type='many2many',
+            type='one2many',
             relation='ip_network.device.script',
             string='Workstation Scripts',
             help='scripts that will be run on remote workstations',
@@ -664,8 +664,10 @@ class remote_scripts(osv.Model):
                      "Use this field anywhere a small image is required.",
                      ),
         'has_image': fields.function(_has_image, type="boolean"),
-
         }
+
+    def update_scripts(self):
+	    pass
 
 
 # utilities

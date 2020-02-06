@@ -119,8 +119,6 @@
                                             ~tr
                                                 ~td
                                                     @type_id
-                                                ~td
-                                                    @hostname
                                             ~tr
                                                 ~td
                                                     ~div
@@ -135,7 +133,7 @@
             @res_model: = device
             @view_type: form
             @view_id ref='view_ip_network_device_tree'
-            @view_mode: tree,form,kanban
+            @view_mode: kanban,tree,form
             @limit: 4096
 
         ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='10'
@@ -148,6 +146,11 @@
             @model: = device_script
             @arch type='xml'
                 ~kanban version='7.0' .oe_background_grey
+                    @name
+                    @filename
+                    @shebang
+                    @run_by_user
+                    @run_as_user
                     ~templates
                         ~t t-name='kanban-box' t-attf-class='base #{cls}'
                             ~div .oe_kanban_global_click style='border-style: solid'

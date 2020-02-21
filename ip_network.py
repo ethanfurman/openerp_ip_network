@@ -11,7 +11,7 @@ from openerp.exceptions import ERPError
 from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, self_ids, NamedLock
 from osv import orm, osv, fields
 from psycopg2 import ProgrammingError
-from scription import Execute, Job, OrmFile, Var, echo
+from scription import Execute, Job, OrmFile, Var
 from xaml import Xaml
 import images
 import logging
@@ -290,9 +290,6 @@ class device(osv.Model):
         return res
 
     def _set_scripts(self, cr, uid, id, name, value, args=None, context=None):
-        print('_set_scripts\n  id: %r\n  name: %r\n  value: %r\n  args: %r\n  context: %r' % (
-                id, name, value, args, context,
-                ))
         device_script = self.pool.get('ip_network.device.script')
         for cmd, target_id, update in value:
             if cmd != 1:
@@ -705,46 +702,73 @@ class remote_scripts(osv.Model):
 
     def run_script(self, cr, uid, ids, context=None):
         # copy script to remote machine, run it, display results
+        ctx = (context or {}).copy()
         try:
-            target_ip = context['target_ip']
+            target_ip = ctx['target_ip']
         except KeyError:
             raise ERPError('Error', 'Unable to detect IP address.')
+        ctx['ip_addr'] = target_ip
         if isinstance(ids, (int, long)):
             [id] = ids
         else:
             id = ids
-        script = self.read(cr, uid, id, context=context)[0]
+        script = self.read(cr, uid, id, context=ctx)[0]
         filename = script['filename']
         run_as_user = script['run_as_user']
-        Execute(
-                'ssh root@%s "mkdir /opt; mkdir /opt/openerp; mkdir /opt/openerp/bin"' % (target_ip, ),
-                pty=True,
-                password=CONFIG.network.pw,
-                timeout=60,
-                password_timeout=10,
-                )
-        echo('copying file...', border='flag')
-        Execute(
-                'scp -p %s root@%s:/opt/openerp/bin/' % (WS_SCRIPT_LOCATION / filename, target_ip),
-                pty=True,
-                password=CONFIG.network.pw,
-                timeout=60,
-                password_timeout=10,
-                )
-        if run_as_user:
-            user = self.pool['res.users'].read(cr, uid, uid, context=context)['login']
-            commandline = 'ssh root@%s "sudo -u %s /opt/openerp/bin/%s %s"' % (target_ip, user, filename, target_ip)
-        else:
-            commandline = 'ssh root@%s /opt/openerp/bin/%s %s' % (target_ip, filename, target_ip)
         try:
-            echo('creating job %r' % (commandline, ), border='overline')
-            job = Job(commandline, pty=True)
-            echo('  communicating...', border='underline',)
-            job.communicate(password=CONFIG.network.pw, timeout=60, password_timeout=10)
-        except Exception:
-            pass
-        echo('%s [%s]' % (commandline, job.returncode), job.stdout, job.stderr, sep='\n---\n', border='box')
-        return True
+            commandline = 'ssh root@%s "mkdir /opt; mkdir /opt/openerp; mkdir /opt/openerp/bin"' % (target_ip, )
+            job = Job(
+                    commandline,
+                    pty=True,
+                    )
+            job.communicate(
+                    password=CONFIG.network.pw,
+                    timeout=60,
+                    password_timeout=10,
+                    )
+        except Exception as e:
+            ctx['exception'] = str(e)
+        else:
+            try:
+                commandline = 'scp -p %s root@%s:/opt/openerp/bin/' % (WS_SCRIPT_LOCATION / filename, target_ip)
+                job = Job(
+                        commandline,
+                        pty=True,
+                        )
+                job.communicate(
+                        password=CONFIG.network.pw,
+                        timeout=60,
+                        password_timeout=10,
+                        )
+            except Exception as e:
+                ctx['exception'] = str(e)
+            else:
+                if run_as_user:
+                    user = self.pool['res.users'].read(cr, uid, uid, context=ctx)['login']
+                    commandline = 'ssh root@%s "sudo -u %s /opt/openerp/bin/%s %s"' % (target_ip, user, filename, target_ip)
+                else:
+                    commandline = 'ssh root@%s /opt/openerp/bin/%s %s' % (target_ip, filename, target_ip)
+                try:
+                    job = Job(commandline, pty=True)
+                    job.communicate(password=CONFIG.network.pw, timeout=60, password_timeout=10)
+                except Exception as e:
+                    ctx['exception'] = str(e)
+        view_id = self.pool.get('ir.ui.view').search(cr, uid, [('model','=','ip_network.device.script.rseult')])
+        ctx['commandline'] = commandline
+        ctx['returncode'] = job.returncode
+        ctx['stdout'] = job.stdout
+        ctx['stderr'] = job.stderr
+        return {
+            'view_type': 'form',
+            "view_mode": 'form',
+            'res_model': 'ip_network.device.script.result',
+            'type': 'ir.actions.act_window',
+            'target': 'new',
+            'name': filename,
+            'view_id': view_id,
+            'context': ctx,
+            }
+
 
     def onload(self, cr, uid, ids, context=None):
         self._update_scripts(cr, uid, context=context)

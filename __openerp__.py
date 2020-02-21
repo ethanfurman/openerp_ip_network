@@ -20,6 +20,7 @@
             'ip_network_view.xaml',
             'ip_network_data.xaml',
             'security/ir.model.access.csv',
+	    'wizard/script_result_view.xaml',
             ],
     'test': [],
     'installable': True,

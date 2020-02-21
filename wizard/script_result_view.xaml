@@ -1,0 +1,22 @@
+!!! xml1.0
+~openerp
+    ~data
+
+        ~record model='ir.ui.view' #view_ip_network_device_script_result_form
+            @name: Script Results
+            @model: ip_network.device.script.result
+            @arch type='xml'
+                ~form $Script_Results create='false' version='7.0'
+                    ~group
+                        ~group
+                            @ip_addr
+                        ~group
+                            @returncode
+                    ~group
+                        @commandline
+                    ~group
+                        @stdout
+                    ~group
+                        @stderr
+                    ~group
+                        @exception

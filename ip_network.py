@@ -11,7 +11,7 @@ from openerp.exceptions import ERPError
 from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, self_ids, NamedLock
 from osv import orm, osv, fields
 from psycopg2 import ProgrammingError
-from scription import Execute, OrmFile, Var
+from scription import Execute, Job, OrmFile, Var, echo
 from xaml import Xaml
 import images
 import logging
@@ -25,7 +25,7 @@ import traceback
 
 # config
 _logger = logging.getLogger(__name__)
-CONFIG = OrmFile(Path('/%s/fnx.ini' % CONFIG_DIR, types={'_path': Path}))
+CONFIG = OrmFile(Path('/%s/fnx.ini' % CONFIG_DIR), types={'_path': Path})
 KNOWN_HOSTS = Path(pwd.getpwnam('openerp')[5]) / '.ssh/known_hosts'
 QUERY_SCRIPT = Path('/opt/bin/ip_network_query')
 VIRTUAL_ENV = Path(os.environ.get('VIRTUAL_ENV'))
@@ -713,22 +713,37 @@ class remote_scripts(osv.Model):
             [id] = ids
         else:
             id = ids
-        script = self.read(cr, uid, id, context=context)
+        script = self.read(cr, uid, id, context=context)[0]
         filename = script['filename']
         run_as_user = script['run_as_user']
         Execute(
-                'scp %s %s:/opt/openerp/bin/' % (WS_SCRIPT_LOCATION / filename, target_ip),
+                'ssh root@%s "mkdir /opt; mkdir /opt/openerp; mkdir /opt/openerp/bin"' % (target_ip, ),
                 pty=True,
                 password=CONFIG.network.pw,
+                timeout=60,
+                password_timeout=10,
+                )
+        echo('copying file...', border='flag')
+        Execute(
+                'scp -p %s root@%s:/opt/openerp/bin/' % (WS_SCRIPT_LOCATION / filename, target_ip),
+                pty=True,
+                password=CONFIG.network.pw,
+                timeout=60,
+                password_timeout=10,
                 )
         if run_as_user:
             user = self.pool['res.users'].read(cr, uid, uid, context=context)['login']
-            commandline = 'ssh root@%s "su %s && /opt/openerp/bin/%s %s"' % (target_ip, user, filename, target_ip)
-            job = Execute(commandline, pty=True, password=CONFIG.network.pw)
+            commandline = 'ssh root@%s "sudo -u %s /opt/openerp/bin/%s %s"' % (target_ip, user, filename, target_ip)
         else:
             commandline = 'ssh root@%s /opt/openerp/bin/%s %s' % (target_ip, filename, target_ip)
-            job = Execute(commandline, pty=True, password=CONFIG.network.pw)
-        print('%s [%s]' % commandline, job.returncode, job.stdout, job.stderr, sep='\n---\n', border='box')
+        try:
+            echo('creating job %r' % (commandline, ), border='overline')
+            job = Job(commandline, pty=True)
+            echo('  communicating...', border='underline',)
+            job.communicate(password=CONFIG.network.pw, timeout=60, password_timeout=10)
+        except Exception:
+            pass
+        echo('%s [%s]' % (commandline, job.returncode), job.stdout, job.stderr, sep='\n---\n', border='box')
         return True
 
     def onload(self, cr, uid, ids, context=None):

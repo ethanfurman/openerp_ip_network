@@ -91,7 +91,7 @@
                         ~page $Misc_Files @misc_files
                             @device_files
                         ~page $WS_Scripts
-                            @ws_scripts
+                            @ws_scripts mode='kanban' context="{'target_ip': ip_addr}"
 
         ~record model=view #view_ip_network_device_kanban
             @name: ip_network.device.kanban
@@ -133,7 +133,7 @@
             @res_model: = device
             @view_type: form
             @view_id ref='view_ip_network_device_tree'
-            @view_mode: kanban,tree,form
+            @view_mode: tree,form,kanban,
             @limit: 4096
 
         ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='10'
@@ -141,11 +141,29 @@
 
         // remote scripts
 
+        ~record model=view #view_ip_network_device_script_form
+            @name: ip_network.device.script.form
+            @model: = device_script
+            @arch type='xml'
+                ~form $device_script version='7.0' setup='onload()'
+                    ~group
+                        ~group
+                            @name
+                            @filename
+                            ~separator colspan='2'
+                            @run_by_user
+                            @run_as_user
+                        ~group
+                            @active
+                    ~label for='script' $Script
+                    @script nolabel='1'
+
         ~record model=view #view_ip_network_device_script_kanban
             @name: ip_network.device.script.kanban
             @model: = device_script
             @arch type='xml'
                 ~kanban version='7.0' .oe_background_grey
+                    @active
                     @name
                     @filename
                     @shebang
@@ -153,30 +171,47 @@
                     @run_as_user
                     ~templates
                         ~t t-name='kanban-box' t-attf-class='base #{cls}'
-                            ~div .oe_kanban_global_click style='border-style: solid'
-                                ~a type='open'
-                                    ~img t-att-src="kanban_image('ip_network.device.script', 'image_small', record.id.value )" .oe_avatar .oe_kanban_avatar_smallbox
+                            ~div style='border-style: solid'
+                                ~img t-att-src="kanban_image('ip_network.device.script', 'image_small', record.id.value )" .oe_avatar .oe_kanban_avatar_mediumbox
                                 ~div .oe_module_desc
                                     ~div .oe_kanban_box_content
                                         ~table .oe_kanban_table
                                             ~tr
                                                 ~td .oe_kanban_title1
-                                                    ~h4
-                                                        @name
+                                                    ~a type='open'
+                                                        ~h4
+                                                            @name
                                             ~tr
                                                 ~td
                                                     @filename
                                                 ~td
-                                                    ~div t-if='record.run_by_user.raw_value': Run by: user
-                                                    ~div t-if='!record.run_by_user.raw_value': Run by: root
+                                                    ~div t-if='record.run_by_user.raw_value': Run by:
+                                                        ~i: ~b: User
+                                                    ~div t-if='!record.run_by_user.raw_value': Run by:
+                                                        ~i: ~b: Admin
                                             ~tr
                                                 ~td
                                                     @shebang
                                                 ~td
-                                                    ~div t-if='record.run_as_user.raw_value': Run as: user
-                                                    ~div t-if='!record.run_as_user.raw_value': Run as: root
-                                ~button type='object' @update_scripts .oe_avatar .oe_kanban_avatar_smallbox
-                                    ~img src='/web/static/src/img/icons/gtk-refresh.png'
+                                                    ~div t-if='record.run_as_user.raw_value': Run as:
+                                                        ~i: ~b: user
+                                                    ~div t-if='!record.run_as_user.raw_value': Run as:
+                                                        ~i: ~b: root
+                                            ~tr
+                                                ~td
+                                                ~td t-if='record.active.raw_value'
+                                                    ~button type='object' @run_script .oe_avatar .oe_right
+                                                        Run
+
+        ~record model=action #action_ip_network_device_script
+            @name: Remote Scripts
+            @res_model: = device_script
+            @view_type: form
+            @view_id ref='view_ip_network_device_script_kanban'
+            @view_mode: kanban,form
+            @limit: 4096
+
+        ~menuitem name='Remote Scripts' #menu_ip_network_device_script parent='menu_ip_network_conf' action='action_ip_network_device_script' sequence='50'
 
 
         // device types
@@ -212,7 +247,7 @@
             @view_id ref='view_ip_network_device_type_tree'
             @view_mode: tree,form
 
-        ~menuitem @Types #menu_ip_network_conf_device_type parent='menu_ip_network_conf' action='action_ip_network_device_type'
+        ~menuitem @Types #menu_ip_network_conf_device_type parent='menu_ip_network_conf' action='action_ip_network_device_type' sequence='10'
 
 
         // commands
@@ -264,7 +299,7 @@
             @view_mode: tree,form
             @domain: ['|',('active','=',True),('active','=',False)]
 
-        ~menuitem @Commands #menu_ip_network_conf_command parent='menu_ip_network_conf' action='action_ip_network_command'
+        ~menuitem @Commands #menu_ip_network_conf_command parent='menu_ip_network_conf' action='action_ip_network_command' sequence='20'
 
 
         // fields
@@ -301,7 +336,7 @@
             @view_id ref='view_ip_network_extra_field_tree'
             @view_mode: tree,form
 
-        ~menuitem @Fields #menu_ip_network_conf_field parent='menu_ip_network_conf' action='action_ip_network_field'
+        ~menuitem @Fields #menu_ip_network_conf_field parent='menu_ip_network_conf' action='action_ip_network_field' sequence='30'
 
         // this pc
 

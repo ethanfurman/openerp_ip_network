@@ -506,6 +506,11 @@ def single_command(command, results, errors, address):
     job = Job(commandline, pty=pty)
     try:
         job.communicate(timeout=SCAN_TIMEOUT, password=password)
+    except UnableToKillJob:
+        try:
+            Execute("sudo kill -9 %s" % job.pid)
+        except Exception:
+            pass
     except Exception:
         pass
     finally:
@@ -996,3 +1001,4 @@ try:
 finally:
     if stdout_settings != None and os.isatty(sys.stdout.fileno()):
         termios.tcsetattr(sys.stdout, termios.TCSADRAIN, stdout_settings)
+

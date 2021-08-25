@@ -81,10 +81,10 @@ else:
 # API
 
 @Script(
-        host=('host where OpenERP instance is running', OPTION),
-        db=('database to use', OPTION),
-        user=('login name to use', OPTION),
-        pw=('password for login name', OPTION),
+        host=('host where OpenERP instance is running', OPTION, None),
+        db=('database to use', OPTION, None),
+        user=('login name to use', OPTION, None),
+        pw=('password for login name', OPTION, None),
         log=Spec('logging level to use', OPTION, abbrev=None, force_default='INFO', type=u.upper),
         log_file=Spec('file to log to', OPTION, abbrev=None, force_default='%s/var/log/openerp/ip_network_query.log' % VIRTUAL_ENV),
         )
@@ -506,11 +506,6 @@ def single_command(command, results, errors, address):
     job = Job(commandline, pty=pty)
     try:
         job.communicate(timeout=SCAN_TIMEOUT, password=password)
-    except UnableToKillJob:
-        try:
-            Execute("sudo kill -9 %s" % job.pid)
-        except Exception:
-            pass
     except Exception:
         pass
     finally:

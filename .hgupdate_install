@@ -1,1 +1,1 @@
-scripts/query ip_network_query
+scripts/query ip_network_query --suid

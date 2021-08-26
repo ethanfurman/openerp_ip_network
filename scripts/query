@@ -183,6 +183,8 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
             addresses.extend(list(IPv4Network(network)))
         else:
             addresses.extend([h for h in IPv4Network(network).hosts()])
+    if not addresses:
+        abort('no addresses found in %s' % networks)
     _logger.debug('addresses to check: %s', ', '.join(str(d) for d in addresses))
     # sort addresses that actually exist first
     oe_devices = set([
@@ -437,6 +439,11 @@ def process_host(address, commands):
         print('[%15.5f]  %s  ->  %r' % (time.time()-START, address, cmd.command), verbose=2)
         try:
             ran = single_command(cmd, results, errors, address)
+        except (InvalidPassword, HostIDChanged, ConnectionClosed, ConnectionReset) as exc:
+            clues.add(exc.__doc__)
+            status.append(Status.danger)
+            exceptions.append(str(exc))
+            break
         except (UnableToContact, TarPit) as exc:
             exceptions.append(str(exc))
             ran = True
@@ -504,9 +511,12 @@ def single_command(command, results, errors, address):
         return False
     start_time = time.time()
     job = Job(commandline, pty=pty)
+    failed = None
     try:
         job.communicate(timeout=SCAN_TIMEOUT, password=password)
-    except Exception:
+    except FailedPassword as failed:
+        pass
+    except Exception as failed:
         pass
     finally:
         job.close()
@@ -533,13 +543,22 @@ def single_command(command, results, errors, address):
         errors.setdefault('by_ip', {}).setdefault(address, {}).setdefault(job_error, []).append(command.name)
         errors.setdefault('by_command', {})[command.name] = address
         results['status'] = {'value': Status.danger}
-        if command.name == 'Network Search':
+        if isinstance(failed, FailedPassword):
+            raise InvalidPassword(str(job.stderr))
+        elif 'connection closed by' in job.stderr.lower():
+            raise ConnectionClosed(job.stderr)
+        elif 'connection reset by' in job.stderr.lower():
+            raise ConnectionReset(job.stderr)
+        elif 'remote host identification has changed' in job.stderr.lower():
+            raise HostIDChanged(job.stderr)
+        elif command.name == 'Network Search':
             results['status'] = {'value': Status.unknown}
             results['ip_addr'] = {'value': address}
             results['type_id'] = {'value': Type.tarpit}
             print('raising TarPit', verbose=3)
             raise TarPit('no Network Search results\n\n%s\n\n===================' % '\n'.join(message))
-        raise JobFailed('error running %s:\n%s' % (command.name, job_error))
+        else:
+            raise JobFailed('error running %s:\n%s' % (command.name, job_error))
     else:
         print('job output:\n%s' % (text, ), verbose=3)
     sandbox = {
@@ -836,28 +855,48 @@ class Task(object):
 
 
 class UnableToContact(Exception):
-    pass
+    "failed ping test"
 
 
 class TarPit(Exception):
-    pass
+    "too slow to respond"
 
 
 class CreateFailure(Exception):
-    pass
+    "unable to create record in OpenERP"
 
 
 class UpdateFailure(Exception):
-    pass
+    "unable to write record in OpenERP"
 
 
 class ScriptError(Exception):
     "script raised an exception"
-    pass
+
 
 class JobFailed(Exception):
     "external job had non-zero return code"
-    pass
+
+
+class InvalidPassword(JobFailed):
+    "password failed"
+
+
+class HostIDChanged(JobFailed):
+    "remote host identification changed"
+
+
+class ConnectionError(JobFailed):
+    "connection problem with peer"
+
+
+class ConnectionClosed(ConnectionError):
+    "connection closed by remote host"
+
+
+class ConnectionReset(ConnectionError):
+    "connection reset by peer"
+
 
 class IDEnum(MultiValueEnum):
     "primary value should be the id of the matching record"
@@ -996,4 +1035,3 @@ try:
 finally:
     if stdout_settings != None and os.isatty(sys.stdout.fileno()):
         termios.tcsetattr(sys.stdout, termios.TCSADRAIN, stdout_settings)
-

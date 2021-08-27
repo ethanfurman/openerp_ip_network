@@ -439,7 +439,7 @@ def process_host(address, commands):
         print('[%15.5f]  %s  ->  %r' % (time.time()-START, address, cmd.command), verbose=2)
         try:
             ran = single_command(cmd, results, errors, address)
-        except (InvalidPassword, HostIDChanged, ConnectionClosed, ConnectionReset) as exc:
+        except ConnectionError as exc:
             clues.add(exc.__doc__)
             status.append(Status.danger)
             exceptions.append(str(exc))
@@ -543,12 +543,15 @@ def single_command(command, results, errors, address):
         errors.setdefault('by_ip', {}).setdefault(address, {}).setdefault(job_error, []).append(command.name)
         errors.setdefault('by_command', {})[command.name] = address
         results['status'] = {'value': Status.danger}
+        stderr = job.stderr.lower()
         if isinstance(failed, FailedPassword):
             raise InvalidPassword(str(job.stderr))
-        elif 'connection closed by' in job.stderr.lower():
-            raise ConnectionClosed(job.stderr)
-        elif 'connection reset by' in job.stderr.lower():
-            raise ConnectionReset(job.stderr)
+        elif (     'connection closed by' in stderr
+                or 'connection reset by' in stderr
+                or 'connection timed out during banner exchange' in stderr
+                or 'no matching key exchange method' in stderr
+            ):
+            raise ConnectionError(job.stderr)
         elif 'remote host identification has changed' in job.stderr.lower():
             raise HostIDChanged(job.stderr)
         elif command.name == 'Network Search':
@@ -878,24 +881,16 @@ class JobFailed(Exception):
     "external job had non-zero return code"
 
 
-class InvalidPassword(JobFailed):
+class ConnectionError(JobFailed):
+    "unable to establish connection"
+
+
+class InvalidPassword(ConnectionError):
     "password failed"
 
 
-class HostIDChanged(JobFailed):
+class HostIDChanged(ConnectionError):
     "remote host identification changed"
-
-
-class ConnectionError(JobFailed):
-    "connection problem with peer"
-
-
-class ConnectionClosed(ConnectionError):
-    "connection closed by remote host"
-
-
-class ConnectionReset(ConnectionError):
-    "connection reset by peer"
 
 
 class IDEnum(MultiValueEnum):

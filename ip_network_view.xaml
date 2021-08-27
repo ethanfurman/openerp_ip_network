@@ -86,12 +86,12 @@
                                 @clues attrs="{'readonly':True}"
                     ~group @short_fields
                     ~notebook @notebook_fields
-                        ~page $Errors attrs="{'invisible': [('errors','=',False)]}"
-                            @errors
-                        ~page $Misc_Files @misc_files
-                            @device_files
                         ~page $WS_Scripts
                             @ws_scripts mode='kanban' context="{'target_ip': ip_addr}"
+                        ~page $Misc_Files @misc_files
+                            @device_files
+                        ~page $Errors
+                            @errors
 
         ~record model=view #view_ip_network_device_kanban
             @name: ip_network.device.kanban

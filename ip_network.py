@@ -264,6 +264,13 @@ class device(osv.Model):
             res[device_rec['id']] = '%010d' % ip_as_int
         return res
 
+    def _get_host_id_error_status(self, cr, uid, ids, field_name, arg, context):
+        res = {}
+        for device in self.browse(cr, uid, ids, fields=['id','errors'], context=context):
+            res[device.id] = 'REMOTE HOST IDENTIFICATION HAS CHANGED' in device.errors
+        return res
+
+
     def update_status(self, cr, uid, ids, context=None):
         if isinstance(ids, (int, long)):
             ids = [ids]
@@ -313,7 +320,7 @@ class device(osv.Model):
         'status': fields.selection(DeviceStatus, 'Status'),
         'last_comms': fields.datetime('Last Communication'),
         'clues': fields.text('Problem areas'),
-        'errors': fields.text('Errors encountered'),
+        'errors': fields.html('Errors encountered'),
         # image: all image fields are base64 encoded and PIL-supported
         'image': fields.function(
             _get_image,
@@ -345,11 +352,32 @@ class device(osv.Model):
             string='Workstation Scripts',
             help='scripts that will be run on remote workstations',
             ),
+        'error_host_id_changed': fields.function(
+            _get_host_id_error_status,
+            type='boolean',
+            string='Host ID changed',
+            store={
+                'ip_network.device': (self_ids, ['errors'], 10),
+                },
+            ),
         }
 
     _sql_constraints = [
             ('ip_addr_unique', 'unique(ip_addr_as_int)', 'That IP address already exists.'),
             ]
+
+    def button_remove_key(self, cr, uid, ids, context=None):
+        if isinstance(ids, (int, long)):
+            ids = [ids]
+        for dev in self.browse(cr, uid, ids, context=context):
+            # only process the first ip (should only have been one, anyway)
+            if 'REMOTE HOST IDENTIFICATION HAS CHANGED' not in dev.errors:
+                raise ERPError('Logic Error','%s not showing host id changed error, this should not be happening' % dev.ip_addr)
+            job = Execute('ssh-keygen -f "/home/openerp/.ssh/known_hosts" -R %s' % dev.ip_addr, pty=True)
+            if job.returncode:
+                raise ERPError('O/S Error', '\n---\n'.join([job.stdout, job.stderr]))
+            job = Execute('ssh %s' % dev.ip_addr, pty=True, input='yes\n', timeout=5)
+            return self.update_status(cr, uid, ids, context=context)
 
 
 class command(osv.Model):

@@ -91,7 +91,10 @@
                         ~page $Misc_Files @misc_files
                             @device_files
                         ~page $Errors
-                            @errors
+                            @error_host_id_changed invisible='1'
+                            ~pre
+                                @errors
+                            ~button $Remove_Key @button_remove_key type='object' attrs="{'invisible': [('error_host_id_changed','=',False)]}"
 
         ~record model=view #view_ip_network_device_kanban
             @name: ip_network.device.kanban

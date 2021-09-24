@@ -266,7 +266,7 @@ class device(osv.Model):
 
     def _get_host_id_error_status(self, cr, uid, ids, field_name, arg, context):
         res = {}
-        for device in self.browse(cr, uid, ids, fields=['id','errors'], context=context):
+        for device in self.browse(cr, uid, ids, context=context):
             res[device.id] = 'REMOTE HOST IDENTIFICATION HAS CHANGED' in device.errors
         return res
 
@@ -356,9 +356,7 @@ class device(osv.Model):
             _get_host_id_error_status,
             type='boolean',
             string='Host ID changed',
-            store={
-                'ip_network.device': (self_ids, ['errors'], 10),
-                },
+            store=False,
             ),
         }
 

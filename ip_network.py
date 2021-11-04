@@ -91,7 +91,7 @@ class device_type(Normalize, osv.Model):
 
     _columns = {
         'name': fields.char('Device Type', size=64, required=True),
-        'short_name': fields.char('Short Name', size=24),
+        'short_name': fields.char('Short Name', size=24, required=True, help='letters, numbers, and underscores only'),
         'description': fields.text(),
         'test': fields.char('Test', size=128),
         'sequence': fields.integer('Run Order'),
@@ -99,6 +99,11 @@ class device_type(Normalize, osv.Model):
 
     _constraints = [
         (lambda s, *a: s.check_unique('name', *a), '\nDevice type already exists', ['name']),
+        ]
+
+    _sql_constraints = [
+        ('valid_identifier', "CHECK (short_name ~* '[a-z]+[a-z0-9_]*)",  'Invalid name: only lowecase letters, digits, and the _ may be used.'),
+        ('identifier_uniq', 'unique(short_name)', 'Short name must be unique.'),
         ]
 
 

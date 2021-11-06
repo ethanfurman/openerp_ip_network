@@ -2,14 +2,8 @@
 
 # docstring
 """\
-Get and run the commands in IP Network Command section, collect and
-process the data using the scripts from the configuration section, and
-feed the results back to OpenERP.
-
-Due to threading issues when running inside OpenERP, this utility exists to
-do the heavy lifting outside the OpenERP process space.
-
-Default time zone is America/Los Angeles.
+Manage the commands in the IP Network Command section by adding, editing, and/or
+deleting the settings and scripts that make up each one.
 """
 
 # imports
@@ -50,8 +44,6 @@ if os.path.exists("/etc/timezone"):
         f.close()
 server_timezone = timezone(tz_value)
 
-# from pprint import pprint
-
 START = time.time()
 
 # globals
@@ -89,7 +81,7 @@ else:
         log_file=Spec('file to log to', OPTION, abbrev=None, force_default='%s/var/log/openerp/ip_network_query.log' % VIRTUAL_ENV),
         )
 def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
-    global Type, convert, _logger, oe, device_type
+    global Type, convert, _logger, oe, device_type, Status, TypeSource
     # set up logging
     log_level = getattr(logging, log)
     main_logger = logging.getLogger()
@@ -116,6 +108,8 @@ def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
     oe = get_connection(hostname=HOST, database=DB, login=USER, password=PW)
     oe.network = oe.get_model('ip_network.network')
     oe.device = oe.get_model('ip_network.device')
+    Status = oe.device.DeviceStatus
+    TypeSource = oe.device.DeviceTypeSource
     oe.command = oe.get_model('ip_network.extra.command')
     oe.type = oe.get_model('ip_network.device.type')
     Type = IDEnum(
@@ -125,9 +119,7 @@ def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
                 for t in get_records(oe.type)
                 ])
     convert = {
-            MultiValueEnum: lambda v: v.name,
-            IDEnum: lambda v: v.value,
-            Status: lambda v: v.name,
+            Status: lambda v: v.db,
             Type: lambda v: v.value,
             Date: lambda v: v.strftime(DEFAULT_SERVER_DATE_FORMAT),
             Time: lambda v: v.tofloat(),
@@ -156,8 +148,8 @@ def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
         gui=Spec('positive value actives GUI and is line_length', OPTION),
         )
 def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=True, gui=0):
-    "run all commands and update OpenERP"
-    global SCAN_TIMEOUT, UPDATE_OPENERP, GUI
+    "run all commands and update OpenERP with the results"
+    global SCAN_TIMEOUT, UPDATE_OPENERP, GUI, OE_DEVICES
     UPDATE_OPENERP = update
     SCAN_TIMEOUT = scan_timeout
     GUI = gui
@@ -187,11 +179,11 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
         abort('no addresses found in %s' % networks)
     _logger.debug('addresses to check: %s', ', '.join(str(d) for d in addresses))
     # sort addresses that actually exist first
-    oe_devices = set([
-        IPv4Address(unicode(d.ip_addr))
-        for d in get_records(oe.device, fields=['id', 'ip_addr'])
-        ])
-    addresses.sort(key=lambda a: (1, 0)[a in oe_devices])
+    OE_DEVICES = dict(
+        (IPv4Address(unicode(d.ip_addr)), {'id': d.id, 'ip_addr': d.ip_addr, 'type_id': Type(d.type_id), 'type_source': d.type_source})
+        for d in get_records(oe.device, fields=['id', 'ip_addr', 'type_id', 'type_source'])
+        )
+    addresses.sort(key=lambda a: (1, 0)[a in OE_DEVICES])
     errors = {}
     try:
         if threads:
@@ -202,8 +194,11 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
         display_errors(errors)
 
 
-@Command()
-@Alias('list')
+@Command(
+        )
+@Alias(
+        'list'
+        )
 def list_commands():
     "list the available commands"
     echo('Available commands:')
@@ -211,9 +206,6 @@ def list_commands():
         if cmd.where not in ('ssh', 'local'):
             continue
         echo('  %2d: %s -- %s' % (cmd.sequence, cmd.name, cmd.command), end='')
-        # if cmd.help:
-        #     echo(' -->', cmd.help)
-        # else:
         echo()
 
 
@@ -227,10 +219,14 @@ def list_commands():
         )
 def test(command, networks, scan_timeout=60, threads=0, update=False, gui=0):
     "run any 1-10 commands, plus the specified COMMAND, against IP"
-    global SCAN_TIMEOUT, UPDATE_OPENERP, GUI
+    global SCAN_TIMEOUT, UPDATE_OPENERP, GUI, OE_DEVICES
     SCAN_TIMEOUT = scan_timeout
     UPDATE_OPENERP = update
     GUI = gui
+    OE_DEVICES = dict(
+        (IPv4Address(unicode(d.ip_addr)), d.updated(type_id=Type(d.type_id)))
+        for d in get_records(oe.device, fields=['id', 'ip_addr', 'type_id', 'type_source'])
+        )
     command = command.lower().replace(' ', '_').replace('-', '_')
     commands = get_records(oe.command)
     valid_commands = [c for c in commands if c.where in ('ssh', 'local')]
@@ -279,6 +275,7 @@ def test(command, networks, scan_timeout=60, threads=0, update=False, gui=0):
                 else:
                     echo(repr(data))
     display_errors(errors)
+
 
 # support
 
@@ -355,14 +352,14 @@ def update_openerp(ip, results):
         values[field] = value
     if ip != values['ip_addr']:
         raise ValueError('IP %r is not the same as ip_addr %r' % (ip, values['ip_addr']))
-    device = get_records(oe.device, domain=[('ip_addr','=',ip)], fields=['id', 'ip_addr', 'name'], max_qty=1)
+    device = get_records(oe.device, domain=[('ip_addr','=',ip)], fields=['id', 'ip_addr', 'name', 'type_source'], max_qty=1)
     if device:
         # update record
         print('[%15.5f]  updating device %s' % (time.time()-START, ip), verbose=2)
         print('                   using: %r' % (values, ), verbose=3)
         [device] = device
-        # don't update device type if status is offline
-        if Status[values['status']] is Status.offline:
+        # don't update device type if status is offline or it's being user managaed
+        if values['status'] is Status.offline or device.type_source is oe.device.DeviceTypeSource.user:
             values.pop('type_id', None)
         try:
             oe.device.write(device.id, values)
@@ -452,7 +449,6 @@ def process_host(address, commands):
             exceptions.append(str(exc))
             results[cmd.name] = {'status': Status.danger}
             ran = True
-        # pprint(results)
         if not ran:
             continue
         for command, subdict in results.items():
@@ -505,9 +501,17 @@ def single_command(command, results, errors, address):
         pty = False
     print('[%15.5f]  final command: %r' % (time.time()-START, commandline))
     print('Types:', list(Type), verbose=3)
+    device = OE_DEVICES[address]
+    print('device: %r' % device, verbose=2)
+    if device.type_source is TypeSource.user:
+        print('user override of device type:\n  detected: %s\n  override: %s' 
+                % (results.get('type_id', {}).get('value', ''), device.type_id),
+                verbose=2)
+        results['type_id'] = {'value': device.type_id}
     run_for = [Type(id) for id in command.run_for_ids]
     print('restrict to:', ', '.join([str(t) for t in run_for]), verbose=3)
     if run_for and results.get('type_id', {}).get('value', None) not in run_for:
+        print('skipping command', command.name)
         return False
     start_time = time.time()
     job = Job(commandline, pty=pty)
@@ -574,7 +578,7 @@ def single_command(command, results, errors, address):
             'Execute':Execute,
             'cmd_name': command.name,
             'Blocks':Blocks,
-            'Status':Status,
+            'Status':oe.device.DeviceStatus,
             'clock':lambda: datetime_to_str(utc_datetime()),
             're':re,
             }
@@ -613,7 +617,6 @@ def single_command(command, results, errors, address):
     #     'hostname': {'value':'openerp'},
     #   }
     # this allows a script to set more than one field at a time
-    # pprint(results)
     return True
 
 
@@ -895,37 +898,6 @@ class HostIDChanged(ConnectionError):
 
 class IDEnum(MultiValueEnum):
     "primary value should be the id of the matching record"
-
-
-class Status(MultiValueEnum):
-    _order_ = 'online great good warning danger offline unknown'
-    online = 0, 'On-line'
-    great = 1, 'Great'
-    good = 2, 'Good'
-    warning = 3, 'Warning'
-    danger = 4, 'Fix!'
-    offline = 5, 'Off-line'
-    unknown = 6, 'Unknown (tar-pit?)'
-    def __le__(self, other):
-        if not isinstance(other, self.__class__):
-            return NotImplemented
-        else:
-            return self.value <= other.value
-    def __lt__(self, other):
-        if not isinstance(other, self.__class__):
-            return NotImplemented
-        else:
-            return self.value < other.value
-    def __gt__(self, other):
-        if not isinstance(other, self.__class__):
-            return NotImplemented
-        else:
-            return self.value > other.value
-    def __ge__(self, other):
-        if not isinstance(other, self.__class__):
-            return NotImplemented
-        else:
-            return self.value >= other.value
 
 
 class Formatter(logging.Formatter):

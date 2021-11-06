@@ -70,6 +70,10 @@ class DeviceStatus(fields.SelectionEnum):
     offline = 'Off-line'
     unknown = 'Unknown (tar-pit?)'
 
+class DeviceTypeSource(fields.SelectionEnum):
+    _order_ = 'user system'
+    user = "User controlled"
+    system = "System controlled"
 
 # Tables
 
@@ -102,7 +106,7 @@ class device_type(Normalize, osv.Model):
         ]
 
     _sql_constraints = [
-        ('valid_identifier', "CHECK (short_name ~* '[a-z]+[a-z0-9_]*)",  'Invalid name: only lowecase letters, digits, and the _ may be used.'),
+        ('valid_identifier', "CHECK (short_name ~* '[a-z]+[a-z0-9_]*')",  'Invalid name: only lowecase letters, digits, and the _ may be used.'),
         ('identifier_uniq', 'unique(short_name)', 'Short name must be unique.'),
         ]
 
@@ -322,6 +326,7 @@ class device(osv.Model):
                 },
             ),
         'type_id': fields.many2one('ip_network.device.type', 'Device Type', required=True, ondelete='restrict'),
+        'type_source': fields.selection(DeviceTypeSource, 'Device Type source', required=True),
         'status': fields.selection(DeviceStatus, 'Status'),
         'last_comms': fields.datetime('Last Communication'),
         'clues': fields.text('Problem areas'),
@@ -364,6 +369,10 @@ class device(osv.Model):
             store=False,
             ),
         }
+
+    _defaults = {
+            'type_source': DeviceTypeSource.user,
+            }
 
     _sql_constraints = [
             ('ip_addr_unique', 'unique(ip_addr_as_int)', 'That IP address already exists.'),

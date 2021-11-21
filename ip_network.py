@@ -388,7 +388,7 @@ class device(osv.Model):
             job = Execute('ssh-keygen -f "/home/openerp/.ssh/known_hosts" -R %s' % dev.ip_addr, pty=True)
             if job.returncode:
                 raise ERPError('O/S Error', '\n---\n'.join([job.stdout, job.stderr]))
-            job = Execute('ssh %s' % dev.ip_addr, pty=True, input='yes\n', timeout=5)
+            job = Execute('ssh %s' % dev.ip_addr, pty=True, input='yes\n', timeout=300)
             return self.update_status(cr, uid, ids, context=context)
 
 

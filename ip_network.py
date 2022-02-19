@@ -1,7 +1,8 @@
 from __future__ import print_function
 # imports
 from antipathy import Path
-from dbf import Time
+from ast import literal_eval
+from dbf import DateTime, Time
 from VSS.utils import translator
 from fnx_fs.fields import files
 from fnx.oe import Normalize
@@ -12,6 +13,7 @@ from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FO
 from osv import orm, osv, fields
 from psycopg2 import ProgrammingError
 from scription import Execute, Job, OrmFile, Var
+from VSS.finance import FederalHoliday
 from xaml import Xaml
 import images
 import logging
@@ -69,11 +71,50 @@ class DeviceStatus(fields.SelectionEnum):
     danger = 'Fix!'
     offline = 'Off-line'
     unknown = 'Unknown (tar-pit?)'
+ONLINE, GREAT, GOOD, WARNING, DANGER, OFFLINE, UNKNOWN = DeviceStatus
 
 class DeviceTypeSource(fields.SelectionEnum):
     _order_ = 'user system'
     user = "User controlled"
     system = "System controlled"
+
+class JobFrequency(fields.SelectionEnum):
+    _order_ = 'daily weekly monthly quarterly yearly urgent'
+    daily = "once a day jobs"
+    weekly = "once a week jobs"
+    monthly = "once a month jobs"
+    quarterly = "once a quarter jobs"
+    yearly = "once a year jobs"
+    urgent = "single event occurance (store value for trip, alert, and clear)"
+DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
+JF = JobFrequency
+
+class BeatAction(fields.SelectionEnum):
+    _order_ = 'ping alert trip clear'
+    ping = 'heart beat'
+    alert = 'bad problem, notify with messages'
+    trip = 'bad problem, just change status'
+    clear = 'bad problem resolved'
+PING, ALERT, TRIP, CLEAR = BeatAction
+
+# helpers
+
+def _ip2int(module, cr, uid, ids, field_name, arg, context):
+    res = {}
+    for device_rec in module.read(cr, uid, ids, fields=['id','ip_addr'], context=context):
+        ip_addr = device_rec['ip_addr']
+        quads = ip_addr.split('.')
+        if len(quads) != 4:
+             raise ERPError('bad ip address', 'ip address should be a dotted quad [got %r]' % (ip_addr, ))
+        try:
+            quads = [int(q) for q in quads]
+            if not all([0 <= q <= 255 for q in quads]):
+                raise ValueError
+        except ValueError:
+            raise ERPError('bad ip address', 'quad values should be between 0 - 255 [got %r]' % (ip_addr, ))
+        ip_as_int = (quads[0] << 24) + (quads[1] << 16) + (quads[2] << 8) + quads[3]
+        res[device_rec['id']] = '%010d' % ip_as_int
+    return res
 
 # Tables
 
@@ -106,7 +147,7 @@ class device_type(Normalize, osv.Model):
         ]
 
     _sql_constraints = [
-        ('valid_identifier', "CHECK (short_name ~* '[a-z]+[a-z0-9_]*')",  'Invalid name: only lowecase letters, digits, and the _ may be used.'),
+        ('valid_identifier', "CHECK (short_name ~* '[a-z]+[a-z0-9_]*')",  'Invalid name: only lowercase letters, digits, and the _ may be used.'),
         ('identifier_uniq', 'unique(short_name)', 'Short name must be unique.'),
         ]
 
@@ -254,23 +295,6 @@ class device(osv.Model):
             color = getattr(images, color)
             for field in field_names:
                 res[field] = color[field]
-        return res
-
-    def _ip2int(self, cr, uid, ids, field_name, arg, context):
-        res = {}
-        for device_rec in self.read(cr, uid, ids, fields=['id','ip_addr'], context=context):
-            ip_addr = device_rec['ip_addr']
-            quads = ip_addr.split('.')
-            if len(quads) != 4:
-                 raise ERPError('bad ip address', 'ip address should be a dotted quad [got %r]' % (ip_addr, ))
-            try:
-                quads = [int(q) for q in quads]
-                if not all([0 <= q <= 255 for q in quads]):
-                    raise ValueError
-            except ValueError:
-                raise ERPError('bad ip address', 'quad values should be between 0 - 255 [got %r]' % (ip_addr, ))
-            ip_as_int = (quads[0] << 24) + (quads[1] << 16) + (quads[2] << 8) + quads[3]
-            res[device_rec['id']] = '%010d' % ip_as_int
         return res
 
     def _get_host_id_error_status(self, cr, uid, ids, field_name, arg, context):
@@ -425,7 +449,6 @@ class command(osv.Model):
         }
 
     _defaults = {
-
         'active': True,
         'sequence': lambda *a: 50,
         }
@@ -824,7 +847,285 @@ class remote_scripts(osv.Model):
         return res
 
 
+class pulse(osv.Model):
+    "track health of network devices and jobs"
+    _name = 'ip_network.pulse'
+
+    def _calc_name(self, cr, uid, ids, field_name, arg, context):
+        """
+        The name of a record is the IP address of the device and the description.
+        """
+        res = {}.fromkeys(ids, False)
+        for rec in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            res[rec.id] = '%s::%s' % (rec.ip_addr, rec.job)
+        return res
+
+    def _get_pulse_ids_from_beat(pulse_beat, cr, uid, beat_ids, context=None):
+        pulse_ids = [p['pulse_id'][0] for p in pulse_beat.read(cr, uid, beat_ids, ['pulse_id'], context=context)]
+        return pulse_ids
+
+    def _process_timestamps(self, cr, uid, ids, field_names, arg, context):
+        """
+        calculate `deadline` and `last_seen` fields
+        """
+        res = {}.fromkeys(ids, {})
+        if not (field_names and ids):
+            return res
+        pulse_beat = self.pool.get('ip_network.pulse.beat')
+        for pulse in self.read(cr, uid, ids, ['last_seen','frequency','beat_ids'], context=context):
+            pulse_id = pulse['id']
+            beats = pulse_beat.read(cr, uid, [('pulse_id','=',pulse_id)], fields=['timestamp','action'], context=context)
+            if not beats:
+                continue
+            else:
+                beats.sort(key=lambda b: b['timestamp'], reverse=True)
+                beat = beats[0]
+                # create new dict or all ids will share the same values because of the `fromkeys()` above
+                res[pulse_id] = {}
+                res[pulse_id]['last_seen'] = last_seen = beat['timestamp']
+                res[pulse_id]['last_seen_id'] = beat['id']
+                freq = JF(pulse['frequency'])
+                if freq is JF.urgent:
+                    # we don't expect urgent issues
+                    continue
+                last_date = DateTime.strptime(last_seen, DEFAULT_SERVER_DATETIME_FORMAT)
+                if freq is JF.daily:
+                    res[pulse_id]['deadline'] = last_date.replace(delta_day=+2).replace(delta_hour=+1)
+                elif freq in (JF.weekly, JF.monthly):
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date, days=2).replace(delta_hour=+2)
+                elif freq in (JF.quarterly, JF.yearly):
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date, days=5).replace(delta_hour=+4)
+                else:
+                    res[pulse_id]['deadline'] = last_date(delta_day=-1)
+        return res
+
+    _columns = {
+        'name': fields.function(
+            _calc_name,
+            string='Device/Job',
+            type='char',
+            size=288,
+            store={
+                'ip_network.pulse': (self_ids, ['device','job'], 10),
+                },
+            ),
+        'ip_addr': fields.char('IP Address', size=15, required=True),
+        'ip_addr_as_int': fields.function(
+            _ip2int,
+            type='char',
+            string='IP as int',
+            size=10,
+            store={
+                'ip_network.pulse': (self_ids, ['ip_addr'], 10),
+                },
+            ),
+        'job': fields.char('Job name', size=256, required=True),
+        'frequency': fields.selection(JobFrequency, 'Job Frequency', required=True),
+        'last_seen': fields.function(
+            _process_timestamps,
+            type='datetime',
+            string='Last report',
+            multi='timestamp',
+            store={
+                'ip_network.pulse.beat': (_get_pulse_ids_from_beat, ['timestamp'], 10),
+                },
+            ),
+        'last_seen_id': fields.function(
+            _process_timestamps,
+            type='many2one',
+            string="Last beat",
+            relation='ip_network.pulse.beat',
+            multi='timestamp',
+            store={
+                'ip_network.pulse.beat': (_get_pulse_ids_from_beat, ['timestamp'], 10),
+                },
+            ),
+        'deadline': fields.function(
+            _process_timestamps,
+            type='datetime',
+            string='Next due',
+            multi='timestamp',
+            store={
+                'ip_network.pulse.beat': (_get_pulse_ids_from_beat, ['timestamp'], 10),
+                },
+            ),
+        'beat_ids': fields.one2many('ip_network.pulse.beat', 'pulse_id', string='Beats')
+        }
+
+    _sql_constraints = [
+        ('identifier_uniq', 'unique(ip_addr,job)', 'job already exists'),
+        ]
+
+    def process_message_files(self, cr, uid, arg=None, context=None, ids=None):
+        errors = []
+        file_dir = Path('/home/openerp/sandbox/openerp/var/pulse')
+        archive_dir = file_dir/'archive'
+        if not archive_dir.exists():
+            archive_dir.makedirs()
+        for message_file in file_dir.glob('IP*.txt'):
+            timestamp = DateTime.fromtimestamp((message_file.stat().st_mtime))
+            with open(message_file) as f:
+                data = f.read()
+            try:
+                data = literal_eval(data)
+                job = data['job_name']
+                ip = data['ip_address']
+                freq = JobFrequency(data['frequency'])
+                action = data.get('action')
+                if not action:
+                    if freq is JF.urgent:
+                        action = 'trip'
+                    else:
+                        action = 'ping'
+            except Exception as exc:
+                errors.append((message_file, exc))
+                continue
+            beat_model = self.pool.get('ip_network.pulse.beat')
+            pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
+            if pulse_jobs:
+                pulse_id = pulse_jobs[0].id
+            else:
+                pulse_id = self.create(
+                        cr, uid,
+                        {'job': job, 'ip_addr': ip, 'frequency': freq, 'last_seen': timestamp},
+                        context=context,
+                        )
+            beat_model.create(cr, uid, {'pulse_id':pulse_id, 'timestamp':timestamp, 'action':action}, context=context)
+            #
+            # TODO send text-message/email for each device in urgent
+            #
+        for err in errors:
+            _logger.error("file: %r, exc: %r", *err)
+        return True
+
+    def check_grace_periods(self, cr, uid, arg=None, context=None, ids=None):
+        """
+        runs every hour to check for overdue jobs
+
+        will change ip_device.status to/from `fix` and add pulse job name to ip_device.clues
+        if frequency is `alert`, send an email/text-message
+        """
+        # - collect all pulses that are late (deadline is earlier than right now)
+        # - collect all pulses of type `urgent`
+        # - collect devices that match the pulses' IP address
+        # - craft the device status message
+        # - for `ping` pulses:
+        #   - if the message is not in the `clues` fields, add it
+        #   - if the device status is not currently `fix`, change it to `fix`
+        # - for `urgent` pulses:
+        #   - get beats and sort by timestamp
+        #   - if latest beat action is `alert`, all three below; if `trip`, skip the "send message":
+        #     - send message and change device status
+        #     - ensure message is in `clues`
+        #     - ensure device status is `fix`
+        #
+        # - collect all devices with a status of `fix` (except the ones we just changed to `fix`)
+        # - while "pulse" is in the device's status:
+        #   - extract pulse name from status message
+        #   - look up pulse
+        #   - if action is `clear` or `deadline` is later than right now:
+        #     - remove pulse from `clues`
+        #     - change device status to `good` if no other clues
+        #
+        # - a pulse message: "pulse: <job name>"
+        #
+        now = fields.datetime.now(self, cr)
+        network_device = self.pool.get('ip_network.device')
+        # collect all the pulses (which are jobs, the beats are the instances of pulses)
+        pulses = {}
+        for p in self.browse(cr, uid, [(1,'=',1)], context=context):
+            pulses.setdefault(p.ip_addr_as_int, []).append(p)
+        #
+        # handle pulses / devices
+        #
+        # - get all devices and store current `clues` field, plus a copy
+        # - for each device
+        #   - check if any current pulse warnings have been resolved
+        #   - check if any pulses are past due
+        #   - calculate differences between orginal `clues` and updated `clues`, and update OpenERP
+        #
+        # collect all the devices
+        devices = dict(
+                (d.ip_addr_as_int, d)
+                for d in network_device.browse(cr, uid, [(1,'=',1)], context=context)
+                )
+        # cycle through the devices
+        for dev_int_ip, dev in devices.items():
+            old_clues = [c for c in (dev.clues or '').split('\n') if c]
+            new_clues = old_clues[:]
+            # any pulses?
+            for pulse in pulses.get(dev_int_ip, []):
+                beat = pulse.last_seen_id
+                message = 'pulse: %s' % pulse.job
+                # if beat action is PING, compare next expected date with now to see if it missed
+                # checking in
+                if beat.action == PING:
+                    if now > pulse.deadline:
+                        # make sure message is in clues
+                        if message not in new_clues:
+                            new_clues.insert(0, message)
+                    else:
+                        # make sure message _is not_ in clues
+                        if message in new_clues:
+                            new_clues.remove(message)
+                elif beat.action in (ALERT, TRIP):
+                    if message not in new_clues:
+                        new_clues.insert(0, message)
+                else: # beat action must be CLEAR
+                    if message in new_clues:
+                        new_clues.remove(message)
+            # processed all the pulses for this device -- have the clues changed?
+            if sorted(old_clues) != sorted(new_clues):
+                values = {
+                        'clues': '\n'.join(new_clues),
+                        'status': (GOOD, DANGER)[bool(new_clues)],
+                        }
+                network_device.write(cr, uid, dev.id, values, context=context)
+        return True
+
+class pulse_beat(osv.Model):
+    """
+    an instance of a pulse
+    """
+    _name = 'ip_network.pulse.beat'
+    _order = 'timestamp asc, name asc'
+
+    def _calc_name(self, cr, uid, ids, field_name, arg, context):
+        """
+        name is date/time of beat and pulse name and frequency
+        """
+        res = {}
+        for rec in self.browse(cr, SUPERUSER_ID, ids, context=context):
+            dt = fields.datetime.server_time(self, cr, rec.timestamp)  # convert from UTC to server's time-zone
+            dt = dt.strftime('%Y-%m-%d %H:%M:%S')
+            res[rec.id] = '[%s] %s::%s' % (dt, rec.pulse_id.ip_addr, rec.pulse_id.job)
+        return res
+
+    def _get_ids_from_pulse(pulse_table, cr, uid, changed_ids, context=None):
+        self = pulse_table.pool.get('ip_network.pulse.beat')
+        ids = self.search(cr, uid, [('id','in',changed_ids)], context=context)
+        return ids
+
+    _columns = {
+        'name': fields.function(
+            _calc_name,
+            string='Name',
+            type='char',
+            size=324,
+            store={
+                'ip_network.pulse.beat': (self_ids, ['timestamp'], 10),
+                'ip_network.pulse': (_get_ids_from_pulse, ['device','job'], 20),
+                },
+            ),
+        'pulse_id': fields.many2one('ip_network.pulse', 'Pulse', required=True),
+        'timestamp': fields.datetime('Reported', required=True),
+        'action': fields.selection(BeatAction, string='Status'),
+        }
+
+
+
 # utilities
+
 def field_to_dict(command):
     f_type = command.type
     if f_type == 'time':

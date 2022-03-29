@@ -963,15 +963,20 @@ class pulse(osv.Model):
         if not archive_dir.exists():
             archive_dir.makedirs()
         for message_file in file_dir.glob('IP*.txt'):
-            timestamp = DateTime.fromtimestamp((message_file.stat().st_mtime))
             with open(message_file) as f:
                 data = f.read()
+            # we only get one shot, move the file into archives
             try:
-                data = literal_eval(data)
+                message_file.copy(archive_dir)
+            finally:
+                message_file.unlink()
+            try:
+                data = literal_eval(data.replace('datetime.date',''))
                 job = data['job_name']
                 ip = data['ip_address']
                 freq = JobFrequency(data['frequency'])
                 action = data.get('action')
+                timestamp = DateTime(*data['timestamp'])
                 if not action:
                     if freq is JF.urgent:
                         action = 'trip'

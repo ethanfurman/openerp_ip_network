@@ -1,9 +1,13 @@
-#!/usr/local/sbin/suid-python --virtualenv
-
-# docstring
+#!/usr/local/bin/suid-python --virtualenv
 """\
-Manage the commands in the IP Network Command section by adding, editing, and/or
-deleting the settings and scripts that make up each one.
+Get and run the commands in IP Network Command section, collect and
+process the data using the scripts from the configuration section, and
+feed the results back to OpenERP.
+
+Due to threading issues when running inside OpenERP, this utility exists to
+do the heavy lifting outside the OpenERP process space.
+
+Default time zone is America/Los Angeles.
 """
 
 # imports
@@ -14,8 +18,8 @@ from antipathy import Path
 from dbf import Date, DateTime, Time
 from ipaddress import IPv4Network, IPv4Address
 from scription import *
-from openerplib import get_connection, get_records, DEFAULT_SERVER_DATE_FORMAT
-from openerplib import DEFAULT_SERVER_DATETIME_FORMAT
+from openerplib import get_connection, get_records, AttrDict
+from openerplib import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT
 from openerplib.dates import datetime_to_str, utc_datetime
 from Queue import Queue, Empty
 from threading import Thread, Lock#, active_count#, current_thread
@@ -85,8 +89,8 @@ def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
     # set up logging
     log_level = getattr(logging, log)
     main_logger = logging.getLogger()
-    main_logger.setLevel(log_level)
-    handler = logging.handlers.TimedRotatingFileHandler(log_file, when='W0', backupCount=52)
+    handler = logging.handlers.RotatingFileHandler(log_file, backupCount=61)
+    handler.doRollover()
     handler.setFormatter(Formatter('%(asctime)s %(pid)d %(name)s %(levelname)s: %(message)s'))
     main_logger.addHandler(handler)
     _logger = logging.getLogger('ip_network_query')
@@ -104,6 +108,9 @@ def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
     for req in ('HOST', 'USER', 'DB', 'PW'):
         if not module[req]:
             raise SystemExit('%r required; use --help for more info' % req)
+    _logger.debug('host: %r', module.HOST)
+    _logger.debug('user: %r', module.USER)
+    _logger.debug('db  : %r', module.DB)
     # link to openerp tables
     oe = get_connection(hostname=HOST, database=DB, login=USER, password=PW)
     oe.network = oe.get_model('ip_network.network')
@@ -134,6 +141,7 @@ def main(log, log_file, host=HOST, db=DB, user=USER, pw=''):
             tests.append('    if %s: return %s' % (dt.test, Type(dt.id)))
     tests.append('    else: return Type.unknown')
     device_type = '\n'.join(tests)
+    _logger.debug('device_type function:\n%s', device_type)
     sandbox = {'Type': Type}
     exec(device_type, sandbox)
     device_type = sandbox['device_type']
@@ -154,8 +162,8 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
     SCAN_TIMEOUT = scan_timeout
     GUI = gui
     _logger.info('in for_openerp')
-    _logger.debug('networks=%r', networks)
-    _logger.debug('scan_timeout=%r', scan_timeout)
+    _logger.debug('networks: %r', networks)
+    _logger.debug('scan_timeout: %r', scan_timeout)
     if not networks:
         # get them from OpenERP
         _logger.debug('getting networks from OpenERP')
@@ -163,6 +171,7 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
                 unicode(n.network)
                 for n in get_records(oe.network)
                 ]
+    _logger.debug('networks: %r', networks)
     commands = [
             c
             for c in get_records(oe.command)
@@ -180,9 +189,12 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
     _logger.debug('addresses to check: %s', ', '.join(str(d) for d in addresses))
     # sort addresses that actually exist first
     OE_DEVICES = dict(
-        (IPv4Address(unicode(d.ip_addr)), {'id': d.id, 'ip_addr': d.ip_addr, 'type_id': Type(d.type_id), 'type_source': d.type_source})
+        (IPv4Address(unicode(d.ip_addr)), d)
+        # (IPv4Address(unicode(d.ip_addr)), {'id': d.id, 'ip_addr': d.ip_addr, 'type_id': Type(d.type_id), 'type_source': d.type_source})
         for d in get_records(oe.device, fields=['id', 'ip_addr', 'type_id', 'type_source'])
         )
+    for dev in OE_DEVICES.values():
+        dev.type_id = Type(dev.type_id.id)
     addresses.sort(key=lambda a: (1, 0)[a in OE_DEVICES])
     errors = {}
     try:
@@ -192,6 +204,7 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
             process_sequential_hosts_commands(commands, addresses, errors)
     finally:
         display_errors(errors)
+        Execute('/usr/bin/curl http://192.168.11.16:3500/192.168.11.16/daily/ip_network_query')
 
 
 @Command(
@@ -358,7 +371,7 @@ def update_openerp(ip, results):
         print('[%15.5f]  updating device %s' % (time.time()-START, ip), verbose=2)
         print('                   using: %r' % (values, ), verbose=3)
         [device] = device
-        # don't update device type if status is offline or it's being user managaed
+        # don't update device type if status is offline or is being user managaed
         if values['status'] is Status.offline or device.type_source is oe.device.DeviceTypeSource.user:
             values.pop('type_id', None)
         try:
@@ -427,6 +440,7 @@ def process_simultaneous_hosts_commands(commands, addresses, errors, pool_size, 
     return results
 
 def process_host(address, commands):
+    _logger.info('%r', address)
     results = {}
     status = []
     clues = set()
@@ -471,6 +485,8 @@ def process_host(address, commands):
     results['_errors'] = {'value': '\n=============\n'.join(exceptions)}
     print('results keys: %r' % results.keys(), verbose=3)
     # write the results to OpenERP... maybe
+    for key, result in sorted(results.items()):
+        _logger.debug('%r; %s: %r', address, key, result)
     if UPDATE_OPENERP:
         try:
             if not update_openerp(address, results):
@@ -485,6 +501,7 @@ def process_host(address, commands):
 
 def single_command(command, results, errors, address):
     global max_elapsed
+    _logger.debug('%r; command: %r', address, command.name)
     print('[%15.5f]  processing %r' % (time.time()-START, command.name))
     commandline = command.command % {'ip':address}
     if command.where == 'ssh':
@@ -499,18 +516,25 @@ def single_command(command, results, errors, address):
         remove_first_line = False
         password = None
         pty = False
+    _logger.debug('%r; command line: %r', address, commandline)
     print('[%15.5f]  final command: %r' % (time.time()-START, commandline))
     print('Types:', list(Type), verbose=3)
-    device = OE_DEVICES[address]
+    device = OE_DEVICES.get(address, AttrDict(id=False, ip_addr=address, name=False, type_source=TypeSource.system))
     print('device: %r' % device, verbose=2)
     if device.type_source is TypeSource.user:
-        print('user override of device type:\n  detected: %s\n  override: %s' 
-                % (results.get('type_id', {}).get('value', ''), device.type_id),
+        print('user override of device type:\n  detected: %r %s\n  override: %r %s' 
+                % (
+                    type(results.get('type_id', {}).get('value', '')),
+                    results.get('type_id', {}).get('value', ''),
+                    type(device.type_id),
+                    device.type_id,
+                    ),
                 verbose=2)
         results['type_id'] = {'value': device.type_id}
     run_for = [Type(id) for id in command.run_for_ids]
     print('restrict to:', ', '.join([str(t) for t in run_for]), verbose=3)
     if run_for and results.get('type_id', {}).get('value', None) not in run_for:
+        _logger.debug('%r; skpping', address)
         print('skipping command', command.name)
         return False
     start_time = time.time()
@@ -524,6 +548,7 @@ def single_command(command, results, errors, address):
         pass
     finally:
         job.close()
+    _logger.debug('%r; return code: %r\n%s', address, job.returncode, job.stdout + '\n-------\n' + job.stderr)
     end_time = time.time()
     elapsed_time = end_time - start_time
     print('                  %s took %s to run' % (command.name, seconds2time(elapsed_time)), verbose=2)

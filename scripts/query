@@ -192,7 +192,7 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
     OE_DEVICES = dict(
         (IPv4Address(unicode(d.ip_addr)), d)
         # (IPv4Address(unicode(d.ip_addr)), {'id': d.id, 'ip_addr': d.ip_addr, 'type_id': Type(d.type_id), 'type_source': d.type_source})
-        for d in get_records(oe.device, fields=['id', 'ip_addr', 'type_id', 'type_source'])
+        for d in get_records(oe.device, fields=['id', 'ip_addr', 'status', 'type_id', 'type_source'])
         )
     for dev in OE_DEVICES.values():
         dev.type_id = Type(dev.type_id.id)
@@ -351,6 +351,9 @@ class Grid(object):
 def update_openerp(ip, results):
     "find and update the appropriate record in OpenERP"
     print('[%15.5f]  looking for %s on OpenERP' % (time.time()-START, ip))
+    if not results:
+        print('no results for', ip, verbose=2)
+        return False
     ip = str(ip)
     values = {}
     for field, subdict in results.items():
@@ -449,6 +452,7 @@ def process_host(address, commands):
     clues = set()
     errors = {}
     exceptions = []
+    device = OE_DEVICES[address]
     for cmd in commands:
         print('[%15.5f]  %s  ->  %r' % (time.time()-START, address, cmd.command), verbose=2)
         try:
@@ -459,6 +463,8 @@ def process_host(address, commands):
             exceptions.append(str(exc))
             break
         except (UnableToContact, TarPit) as exc:
+            if device.status == 'retired' and cmd.name == 'Network Search':
+                break
             exceptions.append(str(exc))
             ran = True
         except (JobFailed, ScriptError) as exc:

@@ -66,6 +66,7 @@
                     @name
                     @type_id
                     @status
+                    @last_commms
 
         ~record model=view #view_ip_network_device_form
             @name: ip_network.device.form

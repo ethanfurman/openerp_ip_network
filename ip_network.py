@@ -71,6 +71,7 @@ class DeviceStatus(fields.SelectionEnum):
     danger = 'Fix!'
     offline = 'Off-line'
     unknown = 'Unknown (tar-pit?)'
+    retired = 'Out of Service'
 ONLINE, GREAT, GOOD, WARNING, DANGER, OFFLINE, UNKNOWN = DeviceStatus
 
 class DeviceTypeSource(fields.SelectionEnum):
@@ -402,6 +403,22 @@ class device(osv.Model):
             ('ip_addr_unique', 'unique(ip_addr_as_int)', 'That IP address already exists.'),
             ]
 
+    def button_activate(self, cr, uid, ids, context=None):
+        # set status to retired
+        if isinstance(ids, (int, long)):
+            ids = [ids]
+        for dev in self.browse(cr, uid, ids, context=context):
+            # only process the first ip (should only have been one, anyway)
+            return self.update_status(cr, uid, dev.id, context=context)
+
+    def button_ignore(self, cr, uid, ids, context=None):
+        # set status to retired
+        if isinstance(ids, (int, long)):
+            ids = [ids]
+        for dev in self.browse(cr, uid, ids, context=context):
+            # only process the first ip (should only have been one, anyway)
+            dev.status = DeviceStatus.retired
+
     def button_remove_key(self, cr, uid, ids, context=None):
         if isinstance(ids, (int, long)):
             ids = [ids]
@@ -413,7 +430,7 @@ class device(osv.Model):
             if job.returncode:
                 raise ERPError('O/S Error', '\n---\n'.join([job.stdout, job.stderr]))
             job = Execute('ssh %s' % dev.ip_addr, pty=True, input='yes\n', timeout=300)
-            return self.update_status(cr, uid, ids, context=context)
+            return self.update_status(cr, uid, dev.id, context=context)
 
 
 class command(osv.Model):

@@ -73,9 +73,9 @@
             @model: = device
             @arch type='xml'
                 ~form $IP_Map_Devices version='7.0'
-                ~header
-                    ~button @button_ignore $Retire .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','not in',['offline','unknown'])]}"
-                    ~button @button_activate $Activate .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','!=','retired')]}"
+                    ~header
+                        ~button @button_ignore $Retire .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','not in',['offline','unknown'])]}"
+                        ~button @button_activate $Activate .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','!=','retired')]}"
                     ~group
                         ~group
                             @name

@@ -63,7 +63,7 @@ class TestWhere(fields.SelectionEnum):
     user = 'User Entry'
 
 class DeviceStatus(fields.SelectionEnum):
-    _order_ = 'online great good warning danger offline unknown'
+    _order_ = 'online great good warning danger offline unknown retired'
     online = 'On-line'
     great = 'Great'
     good = 'Good'
@@ -72,7 +72,7 @@ class DeviceStatus(fields.SelectionEnum):
     offline = 'Off-line'
     unknown = 'Unknown (tar-pit?)'
     retired = 'Out of Service'
-ONLINE, GREAT, GOOD, WARNING, DANGER, OFFLINE, UNKNOWN = DeviceStatus
+ONLINE, GREAT, GOOD, WARNING, DANGER, OFFLINE, UNKNOWN, RETIRED = DeviceStatus
 
 class DeviceTypeSource(fields.SelectionEnum):
     _order_ = 'user system'

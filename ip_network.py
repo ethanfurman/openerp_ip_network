@@ -63,7 +63,7 @@ class TestWhere(fields.SelectionEnum):
     user = 'User Entry'
 
 class DeviceStatus(fields.SelectionEnum):
-    _order_ = 'online great good warning danger offline unknown'
+    _order_ = 'online great good warning danger offline unknown retired'
     online = 'On-line'
     great = 'Great'
     good = 'Good'
@@ -72,7 +72,7 @@ class DeviceStatus(fields.SelectionEnum):
     offline = 'Off-line'
     unknown = 'Unknown (tar-pit?)'
     retired = 'Out of Service'
-ONLINE, GREAT, GOOD, WARNING, DANGER, OFFLINE, UNKNOWN = DeviceStatus
+ONLINE, GREAT, GOOD, WARNING, DANGER, OFFLINE, UNKNOWN, RETIRED = DeviceStatus
 
 class DeviceTypeSource(fields.SelectionEnum):
     _order_ = 'user system'
@@ -909,9 +909,9 @@ class pulse(osv.Model):
                 if freq is JF.daily:
                     res[pulse_id]['deadline'] = last_date.replace(delta_day=+2).replace(delta_hour=+1)
                 elif freq in (JF.weekly, JF.monthly):
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date, days=2).replace(delta_hour=+2)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+7, delta_hour=+2))
                 elif freq in (JF.quarterly, JF.yearly):
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date, days=5).replace(delta_hour=+4)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_year=+1, delta_day=+7))
                 else:
                     res[pulse_id]['deadline'] = last_date(delta_day=-1)
         return res

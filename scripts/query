@@ -22,7 +22,6 @@ from openerplib import get_connection, get_records, AttrDict
 from openerplib import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT
 from openerplib.dates import datetime_to_str, utc_datetime
 from Queue import Queue, Empty
-from random import shuffle
 from threading import Thread, Lock#, active_count#, current_thread
 from traceback import format_exc
 # from traceback import extract_tb, format_exc, format_list
@@ -192,10 +191,10 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
     OE_DEVICES = dict(
         (IPv4Address(unicode(d.ip_addr)), d)
         # (IPv4Address(unicode(d.ip_addr)), {'id': d.id, 'ip_addr': d.ip_addr, 'type_id': Type(d.type_id), 'type_source': d.type_source})
-        for d in get_records(oe.device, fields=['id', 'ip_addr', 'status', 'type_id', 'type_source'])
+        for d in get_records(oe.device, fields=['id', 'ip_addr', 'status', 'type_id', 'type_source', 'last_comms'])
         )
-    for dev in OE_DEVICES.values():
-        dev.type_id = Type(dev.type_id.id)
+    # for dev in OE_DEVICES.values():
+    #     dev.type_id = Type(dev.type_id.id)
     # addresses.sort(key=lambda a: (1, 0)[a in OE_DEVICES])
     errors = {}
     try:
@@ -265,7 +264,7 @@ def test(command, networks, scan_timeout=60, threads=0, update=False, gui=0):
     if not threads:
         results = process_sequential_hosts_commands(cmds, addresses, errors)
     else:
-        results = process_simultaneous_hosts_commands(cmds, addresses, errors, threads, delay=0.5)
+        results = process_simultaneous_hosts_commands(cmds, addresses, errors, threads, delay=0.1)
     echo()
     for ip, result in sorted(results.items()):
         echo(ip)
@@ -310,7 +309,7 @@ class Grid(object):
     def __init__(self, addresses, width=80):
         # addresses is a list
         self.total = len(addresses)
-        width -= 20
+        # width -= 20
         self.line_length = width // 16
         self.line_length *= 16
         self.height = self.total // self.line_length + 1
@@ -356,6 +355,7 @@ def update_openerp(ip, results):
         return False
     ip = str(ip)
     values = {}
+    print('results in update_openerp', results)
     for field, subdict in results.items():
         try:
             value = subdict['value']
@@ -367,6 +367,7 @@ def update_openerp(ip, results):
         if field == '_errors':
             field = 'errors'
         values[field] = value
+    print('converted:', values)
     if ip != values['ip_addr']:
         raise ValueError('IP %r is not the same as ip_addr %r' % (ip, values['ip_addr']))
     device = get_records(oe.device, domain=[('ip_addr','=',ip)], fields=['id', 'ip_addr', 'name', 'type_source'], max_qty=1)
@@ -375,15 +376,17 @@ def update_openerp(ip, results):
         print('[%15.5f]  updating device %s' % (time.time()-START, ip), verbose=2)
         print('                   using: %r' % (values, ), verbose=3)
         [device] = device
-        # don't update device type if status is offline or is being user managaed
-        if values['status'] is Status.offline or device.type_source is oe.device.DeviceTypeSource.user:
+        # don't update device type if status is offline or is being user managaed, unless device type is unknown
+        if values['type_id'] is Type.unknown:
+            pass
+        elif values['status'] is Status.offline or device.type_source is oe.device.DeviceTypeSource.user:
             values.pop('type_id', None)
         try:
             oe.device.write(device.id, values)
         except Exception as exc:
             raise UpdateFailure('Unable to update %r [id: %r] [%s]' % (ip, device.id, exc))
     else:
-        if values['status'] != 'offline':
+        if values['status'] not in (Status.offline, ):
             # create record
             if 'type_id' not in values:
                 # must be unknown
@@ -405,7 +408,6 @@ def process_sequential_hosts_commands(commands, addresses, errors):
     global grid
     grid = Grid(addresses, GUI or 80)
     results = dict([(a, {}) for a in addresses])
-    shuffle(addresses)
     for host in addresses:
         host_results, host_errors = process_host(host, commands)
         results[host] = host_results
@@ -425,7 +427,6 @@ def process_simultaneous_hosts_commands(commands, addresses, errors, pool_size, 
     grid = Grid(addresses, GUI or 80)
     results = dict([(a, {}) for a in addresses])
     # set up queues for parallel execution
-    shuffle(addresses)
     with TaskPool(pool_size, delay=delay, name='nmap') as pool:
         submitted = 0
         for seq, ip in enumerate(addresses):
@@ -434,15 +435,25 @@ def process_simultaneous_hosts_commands(commands, addresses, errors, pool_size, 
         print('[%15.5f]  %d tasks submitted' % (time.time()-START, submitted), verbose=2)
         while pool.active:
             task = pool.get_result()
-            pool.result_done(task)
             ip = task.kwds['address']
             host_results, host_errors = task()
+            status = host_results['status']['value']
             results[ip] = host_results
+            ch = None
+            if status is Status.offline:
+                if ip in OE_DEVICES:
+                    ch = 'O'
+                else:
+                    ch = '-'
+            elif status is Status.unknown:
+                ch = 'T'
             for ip, outputs in host_errors.get('by_ip', {}).items():
                 for output, command_names in outputs.items():
                     errors.setdefault('by_ip', {}).setdefault(ip, {}).setdefault(output, []).extend(command_names)
+                    ch = 'E'
             for cmd, problem in host_errors.get('by_command', {}).items():
                 errors.setdefault('by_command', {}).setdefault(cmd, []).append(problem)
+            pool.result_done(task, ch=ch)
     return results
 
 def process_host(address, commands):
@@ -452,7 +463,6 @@ def process_host(address, commands):
     clues = set()
     errors = {}
     exceptions = []
-    device = OE_DEVICES[address]
     for cmd in commands:
         print('[%15.5f]  %s  ->  %r' % (time.time()-START, address, cmd.command), verbose=2)
         try:
@@ -462,10 +472,14 @@ def process_host(address, commands):
             status.append(Status.danger)
             exceptions.append(str(exc))
             break
-        except (UnableToContact, TarPit) as exc:
-            if device.status == 'retired' and cmd.name == 'Network Search':
-                break
+        except UnableToContact as exc:
             exceptions.append(str(exc))
+            results[cmd.name] = {'status': Status.offline}
+            ran = True
+        except TarPit as exc:
+            exceptions.append(str(exc))
+            print('setting results[%r] to %r' % (cmd.name, Status.unknown), verbose=3)
+            results[cmd.name] = {'status': Status.unknown}
             ran = True
         except (JobFailed, ScriptError) as exc:
             print('(JobFailed, ScriptError) results -> %r' % (results, ), verbose=3)
@@ -474,23 +488,22 @@ def process_host(address, commands):
             ran = True
         if not ran:
             continue
+        print('processing results for:', ', '.join(results), verbose=3)
         for command, subdict in results.items():
-            print('processing results...', verbose=3)
             if 'status' in subdict:
                 cmd_status = subdict['status']
-                print('appending status %r for command %r' % (cmd_status, command), verbose=3)
-                status.append(cmd_status)
+                print('  appending status %r for command %r' % (cmd_status, command), verbose=3)
                 if not isinstance(cmd_status, Status):
                     cmd_status = Status(cmd_status)
+                status.append(cmd_status)
                 if cmd_status in (Status.warning, Status.danger):
                     clues.add(command)
+        if Status.offline in status or Status.unknown in status:
+            break
     if status:
         # combine various statusi into one status field
         results['status'] = {'value': max(status)}
         results['clues'] = {'value': ', '.join(clues)}
-        if Status.offline in status:
-            # do not update previous clues if machine is off-line
-            del results['clues']
     results['_errors'] = {'value': '\n=============\n'.join(exceptions)}
     print('results keys: %r' % results.keys(), verbose=3)
     # write the results to OpenERP... maybe
@@ -527,24 +540,19 @@ def single_command(command, results, errors, address):
         pty = False
     _logger.debug('%r; command line: %r', address, commandline)
     print('[%15.5f]  final command: %r' % (time.time()-START, commandline))
-    print('Types:', list(Type), verbose=3)
-    device = OE_DEVICES.get(address, AttrDict(id=False, ip_addr=address, name=False, type_source=TypeSource.system))
-    print('device: %r' % device, verbose=2)
+    print('                   Types:', list(Type), verbose=4)
+    device = OE_DEVICES.get(
+            address,
+            AttrDict(id=False, ip_addr=address, name=False, type_source=TypeSource.system, type_id=Type.unknown, last_comms=False),
+            )
+    print('                   device: %r' % device, verbose=2)
     if device.type_source is TypeSource.user:
-        print('user override of device type:\n  detected: %r %s\n  override: %r %s' 
-                % (
-                    type(results.get('type_id', {}).get('value', '')),
-                    results.get('type_id', {}).get('value', ''),
-                    type(device.type_id),
-                    device.type_id,
-                    ),
-                verbose=2)
         results['type_id'] = {'value': device.type_id}
     run_for = [Type(id) for id in command.run_for_ids]
-    print('restrict to:', ', '.join([str(t) for t in run_for]), verbose=3)
+    print('                   restrict to:', ', '.join([str(t) for t in run_for]) or '-', verbose=3)
     if run_for and results.get('type_id', {}).get('value', None) not in run_for:
         _logger.debug('%r; skpping', address)
-        print('skipping command', command.name)
+        print('                   skipping command', command.name)
         return False
     start_time = time.time()
     job = Job(commandline, pty=pty)
@@ -560,7 +568,7 @@ def single_command(command, results, errors, address):
     _logger.debug('%r; return code: %r\n%s', address, job.returncode, job.stdout + '\n-------\n' + job.stderr)
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print('                  %s took %s to run' % (command.name, seconds2time(elapsed_time)), verbose=2)
+    print('                   %s took %s to run' % (command.name, seconds2time(elapsed_time)), verbose=2)
     if not job.returncode and elapsed_time > max_elapsed:
         max_elapsed = elapsed_time
         grid.display_after_grid('%s took %s to run' % (command.name, seconds2time(elapsed_time)), status=True)
@@ -569,15 +577,16 @@ def single_command(command, results, errors, address):
         lines.pop(0)
     text = '\n'.join(lines)
     if job.returncode:
-        print('job failed', verbose=3)
+        print('                   job failed', verbose=3)
         message = []
         if text.strip():
             message.append('[stdout]')
             message.append('   %s' % '\n   '.join(lines))
         message.append('[stderr:  %s]' % job.returncode)
-        message.append('   %s' % '\n   '.join([l for l in job.stderr.strip().split('\n')]))
+        message.append('   %s' % '\n   '.join([l for l in job.stderr.strip().split('\n') if 'WARNING: Running Nmap ' not in l]))
         job_error = '\n'.join(message)
-        print('job output:\n%s' % (job_error, ), verbose=3)
+        print('                   job output:', verbose=3)
+        print('%s' % (job_error, ), verbose=3)
         errors.setdefault('by_ip', {}).setdefault(address, {}).setdefault(job_error, []).append(command.name)
         errors.setdefault('by_command', {})[command.name] = address
         results['status'] = {'value': Status.danger}
@@ -593,15 +602,15 @@ def single_command(command, results, errors, address):
         elif 'remote host identification has changed' in job.stderr.lower():
             raise HostIDChanged(job.stderr)
         elif command.name == 'Network Search':
+            # results['portscan'] = {'status': {'value': Status.unknown}}
             results['status'] = {'value': Status.unknown}
             results['ip_addr'] = {'value': address}
             results['type_id'] = {'value': Type.tarpit}
-            print('raising TarPit', verbose=3)
             raise TarPit('no Network Search results\n\n%s\n\n===================' % '\n'.join(message))
         else:
             raise JobFailed('error running %s:\n%s' % (command.name, job_error))
     else:
-        print('job output:\n%s' % (text, ), verbose=3)
+        print('                   job output:\n%s' % (text, ), verbose=3)
     sandbox = {
             'text':text,
             'result':results,
@@ -624,6 +633,7 @@ def single_command(command, results, errors, address):
             print('field_name: %r' % (field_name, ), verbose=3)
             print('subdict: %r' % (subdict, ), verbose=3)
             # print('%s: %r' % (field_name, subdict['value']), verbose=3)
+        print('-----', verbose=3)
     except Exception:
         job_error = '%(stdout)s\n---\n%(stderr)s' % {
                 'stdout': job.stdout.strip(),
@@ -632,18 +642,31 @@ def single_command(command, results, errors, address):
         errors.setdefault('by_ip', {}).setdefault(address, {}).setdefault(job_error, []).append(command.name)
         errors.setdefault('by_command', {})[command.name] = address
         raise ScriptError('error processing %s results:\n%s' % (command.name, job_error))
-    if command.name == 'Network Search':
+    print('command.name', command.name, verbose=3)
+    if command.name == 'Network Search': 
         if 'ip_addr' not in results:
             # make sure ip_addr is set
             results['ip_addr'] = {'value': address}
-        if results['portscan']['status'] not in (Status.unknown, Status.offline):
+        # if results['portscan']['status'] is not Status.offline:
+        print('results', results)
+        if results['portscan']['status'] is not Status.offline:
             results['last_comms'] = {'value': DateTime.now()}
         else:
             # Open Ports should be the first thing that runs
             # if there are no results after this, no point in continuing
             # with this host
-            errors.setdefault('by_ip', {})
-            errors.setdefault('by_command', {})['Unreachable Hosts'] = address
+            #
+            # if device is in system as TarPit, but no connection was ever made (last_comms is False)
+            # change device type from Tarpit to Unknown
+            if device and device.type_id is Type.tarpit and not device.last_comms:
+                results['type_id'] = {'value': Type.unknown}
+            #
+            # only record errors for this host if it already had an entry in OpenERP
+            print('                   device:', device, verbose=3, border='lined')
+            # results['status'] = {'value': Status.offline}
+            if device.id and device.status is not Status.retired:
+                errors.setdefault('by_ip', {})
+                errors.setdefault('by_command', {})['Unreachable Hosts'] = address
             raise UnableToContact('network_search failed')
     # sandbox['result'] should be, e.g. with hostname:
     #   {
@@ -742,16 +765,8 @@ class TaskPool(object):
 
     def __exit__(self, cls, exc, tb):
         if (cls, exc, tb) != (None, None, None):
-            # display_after_grid('pool exiting -> %r' % (exc, ))
             # escaped exception, abort any queued tasks
             self.abort = True
-            # while 'looking for tasks':
-            #     try:
-            #         self.tasks.get_nowait()
-            #         self.tasks.task_done()
-            #         self.active -= 1
-            #     except Empty:
-            #         break
         else:
             self.shutdown()
         time.sleep(5)
@@ -787,8 +802,10 @@ class TaskPool(object):
     def get_task(self):
         return self.tasks.get()
 
-    def result_done(self, task):
-        grid.update_grid(task.num, '+')
+    def result_done(self, task, ch=None):
+        if ch is None:
+            ch = '+'
+        grid.update_grid(task.num, ch)
         self.results.task_done()
 
     def shutdown(self):

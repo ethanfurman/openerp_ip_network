@@ -988,7 +988,11 @@ class pulse(osv.Model):
             finally:
                 message_file.unlink()
             try:
-                data = literal_eval(data.replace('datetime.date',''))
+                data = literal_eval(data
+                        .replace('datetime.datetime','')
+                        .replace('datetime.date','')
+                        .replace('datetime.time','')
+                        )
                 job = data['job_name']
                 ip = data['ip_address']
                 freq = JobFrequency(data['frequency'])

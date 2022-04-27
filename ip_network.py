@@ -909,9 +909,9 @@ class pulse(osv.Model):
                 if freq is JF.daily:
                     res[pulse_id]['deadline'] = last_date.replace(delta_day=+2).replace(delta_hour=+1)
                 elif freq in (JF.weekly, JF.monthly):
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date, days=2).replace(delta_hour=+2)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+7, delta_hour=+2))
                 elif freq in (JF.quarterly, JF.yearly):
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date, days=5).replace(delta_hour=+4)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_year=+1, delta_day=+7))
                 else:
                     res[pulse_id]['deadline'] = last_date(delta_day=-1)
         return res

@@ -5,6 +5,7 @@
 -action = 'ir.actions.act_window'
 -network = 'ip_network.network'
 -device = 'ip_network.device'
+-pulse = 'ip_network.pulse'
 -device_script = 'ip_network.device.script'
 -device_type = 'ip_network.device.type'
 -field = 'ip_network.extra.field'
@@ -52,7 +53,7 @@
             @view_id ref='view_ip_network_tree'
             @view_mode: tree,form
 
-        ~menuitem @Networks #menu_ip_network_network parent='menu_ip_network' action='action_ip_network'
+        ~menuitem @Networks #menu_ip_network_network parent='menu_ip_network' action='action_ip_network' sequence='10'
 
 
         // devices
@@ -144,7 +145,44 @@
             @view_mode: tree,form,kanban,
             @limit: 4096
 
-        ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='10'
+        ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='20'
+
+
+        // Pulse
+
+        ~record model=view #view_ip_network_pulse_tree
+            @name: ip_network.pulse.tree
+            @model: = pulse
+            @arch type='xml'
+                ~tree $IP_Map_Devices
+                    @name
+                    @frequency
+                    @last_seen
+                    @deadline
+
+        ~record model=view #view_ip_network_device_form
+            @name: ip_network.pulse.form
+            @model: = pulse
+            @arch type='xml'
+                ~form $Pulse version='7.0'
+                    ~group
+                        ~group
+                            @ip_addr
+                            @job
+                            @frequency
+                            @last_seen
+                            @deadline
+                        ~group
+                            @beat_ids options='{"no_open": True}'
+
+        ~record model=action #action_ip_network_pulse
+            @name: IP Pulse
+            @res_model: = pulse
+            @view_type: form
+            @view_id ref='view_ip_network_pulse_tree'
+            @view_mode: tree,form
+
+        ~menuitem @Pulse #menu_ip_network_pulse parent='menu_ip_network' action='action_ip_network_pulse' sequence='30'
 
 
         // remote scripts

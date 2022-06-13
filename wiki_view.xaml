@@ -1,0 +1,37 @@
+!!! coding: utf-8
+!!! xml1.0
+
+-view = 'ir.ui.view'
+-action = 'ir.actions.act_window'
+-wiki = 'ip_network.wiki'
+
+~openerp
+    ~data
+        // Wiki
+
+        ~record model=view #view_ip_network_wiki_tree
+            @name: ip_network.wiki.tree
+            @model: = wiki
+            @arch type='xml'
+                ~tree $Wiki_Pages
+                    @name
+
+        ~record model=view #view_ip_network_wiki_form
+            @name: ip_network.wiki.form
+            @model: = wiki
+            @arch type='xml'
+                ~form $Wiki_Document version='7.0'
+                    ~div
+                        ~h1
+                            @name
+                        @source_doc .oe_edit_only placeholder="wiki document..."
+                        @wiki_doc .oe_view_only
+
+        ~record model=action #action_ip_network_wiki
+            @name: Wiki
+            @res_model: = wiki
+            @view_type: form
+            @view_id ref='view_ip_network_wiki_tree'
+            @view_mode: tree,form
+
+        ~menuitem @Wiki #menu_ip_network_wiki parent='menu_ip_network' action='action_ip_network_wiki' sequence='40'

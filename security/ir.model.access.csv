@@ -18,3 +18,6 @@ access_ip_network_pulse_beat_all,access_ip_network_pulse_beat_all,model_ip_netwo
 
 access_ip_network_pulse_manager,access_ip_network_pulse_manager,model_ip_network_pulse,group_ip_network_manager,1,1,1,1
 access_ip_network_pulse_beat_manager,access_ip_network_pulse_beat_manager,model_ip_network_pulse_beat,group_ip_network_manager,1,1,1,1
+
+access_ip_network_wiki_all,access_ip_network_wiki_all,model_ip_network_wiki,,1,0,0,0
+access_ip_network_wiki_manager,access_ip_network_wiki_manager,model_ip_network_wiki,,1,1,1,1

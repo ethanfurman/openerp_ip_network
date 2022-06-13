@@ -12,6 +12,7 @@
     'depends': [
             'fnx',
             'mail',
+	    'wiki',
             ],
     'css': [
             ],
@@ -19,6 +20,7 @@
             'security/ip_network_security.xaml',
             'ip_network_view.xaml',
             'ip_network_data.xaml',
+	    'wiki_view.xaml',
             'security/ir.model.access.csv',
 	    'wizard/script_result_view.xaml',
             ],

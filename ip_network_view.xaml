@@ -6,6 +6,7 @@
 -network = 'ip_network.network'
 -device = 'ip_network.device'
 -pulse = 'ip_network.pulse'
+-wiki = 'ip_network.wiki'
 -device_script = 'ip_network.device.script'
 -device_type = 'ip_network.device.type'
 -field = 'ip_network.extra.field'
@@ -160,7 +161,7 @@
                     @last_seen
                     @deadline
 
-        ~record model=view #view_ip_network_device_form
+        ~record model=view #view_ip_network_pulse_form
             @name: ip_network.pulse.form
             @model: = pulse
             @arch type='xml'

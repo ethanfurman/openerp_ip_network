@@ -102,6 +102,12 @@
                             ~pre
                                 @errors
                             ~button $Remove_Key @button_remove_key type='object' attrs="{'invisible': [('error_host_id_changed','=',False)]}"
+                    ~hr
+                    ~div
+                        ~h4: Notes
+                        @notes .oe_edit_only
+                        @notes_html .oe_view_only
+
 
         ~record model=view #view_ip_network_device_kanban
             @name: ip_network.device.kanban

@@ -9,7 +9,7 @@ from fnx.oe import Normalize
 from openerp import CONFIG_DIR, SUPERUSER_ID
 from openerp.osv.orm import except_orm as ValidateError
 from openerp.exceptions import ERPError
-from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, self_ids, NamedLock
+from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, self_ids, NamedLock, stonemark2html
 from osv import orm, osv, fields
 from psycopg2 import ProgrammingError
 from scription import Execute, Job, OrmFile, Var
@@ -392,6 +392,16 @@ class device(osv.Model):
             type='boolean',
             string='Host ID changed',
             store=False,
+            ),
+        'notes': fields.text('Notes'),
+        'notes_html': fields.function(
+            stonemark2html,
+            arg='notes',
+            type='html',
+            string='Notes (HTML)',
+            store={
+                'ip_network.device': (self_ids, ['notes'], 10),
+                }
             ),
         }
 

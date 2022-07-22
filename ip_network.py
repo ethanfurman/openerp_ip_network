@@ -1153,7 +1153,7 @@ class pulse_beat(osv.Model):
                 'ip_network.pulse': (_get_ids_from_pulse, ['device','job'], 20),
                 },
             ),
-        'pulse_id': fields.many2one('ip_network.pulse', 'Pulse', required=True),
+        'pulse_id': fields.many2one('ip_network.pulse', 'Pulse', required=True, ondelete='cascade'),
         'timestamp': fields.datetime('Reported', required=True),
         'action': fields.selection(BeatAction, string='Status'),
         }

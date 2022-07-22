@@ -377,7 +377,7 @@ def update_openerp(ip, results):
         print('                   using: %r' % (values, ), verbose=3)
         [device] = device
         # don't update device type if status is offline or is being user managaed, unless device type is unknown
-        if values['type_id'] is Type.unknown:
+        if values.get('type_id') is Type.unknown:
             pass
         elif values['status'] is Status.offline or device.type_source is oe.device.DeviceTypeSource.user:
             values.pop('type_id', None)

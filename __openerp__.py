@@ -10,9 +10,10 @@
     'maintainer': 'Ethan Furman',
     'website': '',
     'depends': [
+            'base',
             'fnx',
             'mail',
-	    'wiki',
+            'wiki',
             ],
     'css': [
             ],
@@ -20,9 +21,9 @@
             'security/ip_network_security.xaml',
             'ip_network_view.xaml',
             'ip_network_data.xaml',
-	    'wiki_view.xaml',
+            'wiki_view.xaml',
             'security/ir.model.access.csv',
-	    'wizard/script_result_view.xaml',
+            'wizard/script_result_view.xaml',
             ],
     'test': [],
     'installable': True,

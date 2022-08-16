@@ -80,14 +80,16 @@ class DeviceTypeSource(fields.SelectionEnum):
     system = "System controlled"
 
 class JobFrequency(fields.SelectionEnum):
-    _order_ = 'daily weekly monthly quarterly yearly urgent'
+    _order_ = 'continuous intermettent daily weekly monthly quarterly yearly urgent'
+    continuous = "multiple times per hour"
+    intermittent = "multiple times per day"
     daily = "once a day jobs"
     weekly = "once a week jobs"
     monthly = "once a month jobs"
     quarterly = "once a quarter jobs"
     yearly = "once a year jobs"
     urgent = "single event occurance (store value for trip, alert, and clear)"
-DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
+CONTINUOUS, INTERMITTENT, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
 JF = JobFrequency
 
 class BeatAction(fields.SelectionEnum):
@@ -912,16 +914,30 @@ class pulse(osv.Model):
                 res[pulse_id]['last_seen'] = last_seen = beat['timestamp']
                 res[pulse_id]['last_seen_id'] = beat['id']
                 freq = JF(pulse['frequency'])
-                if freq is JF.urgent:
+                if freq is URGENT:
                     # we don't expect urgent issues
                     continue
                 last_date = DateTime.strptime(last_seen, DEFAULT_SERVER_DATETIME_FORMAT)
-                if freq is JF.daily:
-                    res[pulse_id]['deadline'] = last_date.replace(delta_day=+2).replace(delta_hour=+1)
-                elif freq in (JF.weekly, JF.monthly):
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+7, delta_hour=+2))
-                elif freq in (JF.quarterly, JF.yearly):
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_year=+1, delta_day=+7))
+                if freq is CONTINUOUS:
+                    res[pulse_id]['deadline'] = last_date.replace(delta_minute=+30)
+                elif freq is INTERMITTENT:
+                    midday = last_date.replace(hour=12, minute=0, second=0)
+                    midnight = last_date.replace(delta_day=+1, hour=0, minute=0, second=0)
+                    next_midday = midday.replace(delta_day=+1)
+                    if last_date < midday:
+                        res[pulse_id]['deadline'] = midnight
+                    else:
+                        res[pulse_id]['deadline'] = next_midday
+                elif freq is DAILY:
+                    res[pulse_id]['deadline'] = last_date.replace(delta_day=+3)
+                elif freq is WEEKLY:
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+7), days=+2)
+                elif freq is MONTHLY:
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_month=+1), days=+2)
+                elif freq is QUARTERLY:
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_month=+3), days=+5)
+                elif freq is YEARLY:
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_year=+1), days=+5)
                 else:
                     res[pulse_id]['deadline'] = last_date(delta_day=-1)
         return res
@@ -1009,8 +1025,10 @@ class pulse(osv.Model):
                 action = data.get('action')
                 timestamp = DateTime(*data['timestamp'])
                 if not action:
-                    if freq is JF.urgent:
+                    if freq is URGENT:
                         action = 'trip'
+                    if freq in (CONTINUOUS, INTERMITTENT):
+                        action = 'alert'
                     else:
                         action = 'ping'
             except Exception as exc:
@@ -1036,7 +1054,7 @@ class pulse(osv.Model):
 
     def check_grace_periods(self, cr, uid, arg=None, context=None, ids=None):
         """
-        runs every hour to check for overdue jobs
+        runs every five minutes to check for overdue jobs
 
         will change ip_device.status to/from `fix` and add pulse job name to ip_device.clues
         if frequency is `alert`, send an email/text-message
@@ -1107,6 +1125,9 @@ class pulse(osv.Model):
                 elif beat.action in (ALERT, TRIP):
                     if message not in new_clues:
                         new_clues.insert(0, message)
+                    if beat.action is ALERT:
+                        # TODO: notify via text message
+                        pass
                 else: # beat action must be CLEAR
                     if message in new_clues:
                         new_clues.remove(message)

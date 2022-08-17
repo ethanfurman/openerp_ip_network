@@ -126,5 +126,5 @@ particular `pulse` from `clues`, possibly changing the status to `Good`.
       to set the name and location of the file, which will rotate at midnight.
 
 [^4]: By default, message files are written in the server's startup directory;
-      a command line parameter is available to set the location (and should be
-      used for production).
+      a command line parameter is available to set the location
+      (and should be used for production).

@@ -80,7 +80,7 @@ class DeviceTypeSource(fields.SelectionEnum):
     system = "System controlled"
 
 class JobFrequency(fields.SelectionEnum):
-    _order_ = 'continuous intermettent daily weekly monthly quarterly yearly urgent'
+    _order_ = 'continuous intermittent daily weekly monthly quarterly yearly urgent'
     continuous = "multiple times per hour"
     intermittent = "multiple times per day"
     daily = "once a day jobs"

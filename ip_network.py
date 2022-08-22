@@ -92,12 +92,19 @@ class JobFrequency(fields.SelectionEnum):
 CONTINUOUS, INTERMITTENT, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
 JF = JobFrequency
 
+class JobStatus(fields.SelectionEnum):
+    _order_ = 'normal overdue failed'
+    normal = 'waiting for next beat'
+    overdue = 'next beat is overdue'
+    failed = 'priority job has failed'
+NORMAL, OVERDUE, FAILED = JobStatus
+
 class BeatAction(fields.SelectionEnum):
     _order_ = 'ping alert trip clear'
-    ping = 'heart beat'
-    alert = 'bad problem, notify with messages'
-    trip = 'bad problem, just change status'
-    clear = 'bad problem resolved'
+    ping = 'record beat'
+    alert = 'notify priority job has failed'
+    trip = 'record that priority job has failed'
+    clear = 'clear priority job failure'
 PING, ALERT, TRIP, CLEAR = BeatAction
 
 # helpers
@@ -952,6 +959,7 @@ class pulse(osv.Model):
                 'ip_network.pulse': (self_ids, ['device','job'], 10),
                 },
             ),
+        'state': fields.selection(JobStatus, 'Status', required=True),
         'ip_addr': fields.char('IP Address', size=15, required=True),
         'ip_addr_as_int': fields.function(
             _ip2int,
@@ -993,6 +1001,10 @@ class pulse(osv.Model):
                 },
             ),
         'beat_ids': fields.one2many('ip_network.pulse.beat', 'pulse_id', string='Beats')
+        }
+
+    _defaults = {
+        'state': NORMAL,
         }
 
     _sql_constraints = [
@@ -1109,6 +1121,7 @@ class pulse(osv.Model):
             new_clues = old_clues[:]
             # any pulses?
             for pulse in pulses.get(dev_int_ip, []):
+                new_state = NORMAL
                 beat = pulse.last_seen_id
                 message = 'pulse: %s' % pulse.job
                 # if beat action is PING, compare next expected date with now to see if it missed
@@ -1118,11 +1131,14 @@ class pulse(osv.Model):
                         # make sure message is in clues
                         if message not in new_clues:
                             new_clues.insert(0, message)
+                        # make sure status is OVERDUE
+                        new_state = OVERDUE
                     else:
                         # make sure message _is not_ in clues
                         if message in new_clues:
                             new_clues.remove(message)
                 elif beat.action in (ALERT, TRIP):
+                    new_state = FAILED
                     if message not in new_clues:
                         new_clues.insert(0, message)
                     if beat.action is ALERT:
@@ -1131,6 +1147,9 @@ class pulse(osv.Model):
                 else: # beat action must be CLEAR
                     if message in new_clues:
                         new_clues.remove(message)
+                # make sure status is current
+                if pulse.state is not new_state:
+                    self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
             # processed all the pulses for this device -- have the clues changed?
             if sorted(old_clues) != sorted(new_clues):
                 values = {
@@ -1176,7 +1195,7 @@ class pulse_beat(osv.Model):
             ),
         'pulse_id': fields.many2one('ip_network.pulse', 'Pulse', required=True, ondelete='cascade'),
         'timestamp': fields.datetime('Reported', required=True),
-        'action': fields.selection(BeatAction, string='Status'),
+        'action': fields.selection(BeatAction, string='Action'),
         }
 
 

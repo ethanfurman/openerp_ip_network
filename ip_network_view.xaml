@@ -161,7 +161,8 @@
             @name: ip_network.pulse.tree
             @model: = pulse
             @arch type='xml'
-                ~tree $IP_Map_Devices
+                ~tree $IP_Map_Devices colors="black:state=='normal';red:state!='normal'"
+                    @state invisible='1'
                     @name
                     @frequency
                     @last_seen
@@ -172,6 +173,10 @@
             @model: = pulse
             @arch type='xml'
                 ~form $Pulse version='7.0'
+                    ~header attrs="{'invisible':[('state','=','normal')]}"
+                        ~h2 .oe_highlight .oe_bold .oe_text_center attrs="{'invisible':[('state','!=','overdue')]}": O V E R D U E
+                        ~h2 .oe_highlight .oe_bold .oe_text_center attrs="{'invisible':[('state','!=','failed')]}": F A I L E D
+                    @state
                     ~group
                         ~group
                             @ip_addr

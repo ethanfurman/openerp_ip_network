@@ -1,4 +1,5 @@
 from __future__ import print_function
+
 # imports
 from antipathy import Path
 from ast import literal_eval
@@ -1023,6 +1024,8 @@ class pulse(osv.Model):
             # we only get one shot, move the file into archives
             try:
                 message_file.copy(archive_dir)
+            except Exception:
+                _logger.exception('failure copying file')
             finally:
                 message_file.unlink()
             try:
@@ -1044,6 +1047,7 @@ class pulse(osv.Model):
                     else:
                         action = 'ping'
             except Exception as exc:
+                _logger.exception('exception raised')
                 errors.append((message_file, exc))
                 continue
             beat_model = self.pool.get('ip_network.pulse.beat')
@@ -1063,6 +1067,7 @@ class pulse(osv.Model):
         for err in errors:
             _logger.error("file: %r, exc: %r", *err)
         return True
+
 
     def check_grace_periods(self, cr, uid, arg=None, context=None, ids=None):
         """

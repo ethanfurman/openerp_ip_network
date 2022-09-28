@@ -24,8 +24,16 @@
                     ~div
                         ~h1
                             @name
-                        @source_doc .oe_edit_only placeholder="wiki document..."
-                        @wiki_doc .oe_view_only
+                        ~group
+                            @source_type .oe_edit_only widget='radio' options="{'horizontal': 1}"
+                        ~div attrs="{'invisible': [('source_type','!=','txt')]}"
+                            @source_doc .oe_edit_only placeholder="wiki document..."
+                            @wiki_doc .oe_view_only
+                        ~div attrs="{'invisible': [('source_type','!=','img')]}"
+                            @source_img widget='image'
+                        ~div
+                            ~hr
+                            @reverse_links .oe_view_only widget='many2many_tags'
 
         ~record model=action #action_ip_network_wiki
             @name: Wiki

@@ -1164,12 +1164,28 @@ class pulse(osv.Model):
                 network_device.write(cr, uid, dev.id, values, context=context)
         return True
 
+    def purge_pulse_beats(self, cr, uid, arg=None, context=None, ids=None):
+        # should be run every half-hour
+        archive_dir = Path('/home/openerp/sandbox/openerp/var/pulse/archive')
+        job_files = {}
+        count = 0
+        for message_file in archive_dir.glob():
+            count += 1
+            job, date = message_file[:-20], message_file[-19:-4]
+            job_files.setdefault(job, []).append(date)
+        for job, files in job_files.items():
+            files.sort(reverse=True)
+            for date in files[50:]:
+                filename = '%s-%s.txt' % (job, date)
+                archive_dir.unlink(filename)
+
+
 class pulse_beat(osv.Model):
     """
     an instance of a pulse
     """
     _name = 'ip_network.pulse.beat'
-    _order = 'timestamp asc, name asc'
+    _order = 'timestamp desc, name asc'
 
     def _calc_name(self, cr, uid, ids, field_name, arg, context):
         """

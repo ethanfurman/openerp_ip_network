@@ -1045,8 +1045,6 @@ class pulse(osv.Model):
                 if not action:
                     if freq is URGENT:
                         action = 'trip'
-                    if freq in (CONTINUOUS, INTERMITTENT):
-                        action = 'alert'
                     else:
                         action = 'ping'
             except Exception as exc:
@@ -1172,7 +1170,7 @@ class pulse(osv.Model):
         archive_dir = Path('/home/openerp/sandbox/openerp/var/pulse/archive')
         job_files = {}
         count = 0
-        for message_file in archive_dir.glob():
+        for message_file in archive_dir.listdir():
             count += 1
             job, date = message_file[:-20], message_file[-19:-4]
             job_files.setdefault(job, []).append(date)

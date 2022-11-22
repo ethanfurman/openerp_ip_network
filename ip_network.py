@@ -10,7 +10,8 @@ from fnx.oe import Normalize
 from openerp import CONFIG_DIR, SUPERUSER_ID
 from openerp.osv.orm import except_orm as ValidateError
 from openerp.exceptions import ERPError
-from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, self_ids, NamedLock, stonemark2html
+from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, SERVER_TIMEZONE, UTC
+from openerp.tools import self_ids, NamedLock, stonemark2html
 from osv import orm, osv, fields
 from psycopg2 import ProgrammingError
 from scription import Execute, Job, OrmFile, Var
@@ -1039,6 +1040,8 @@ class pulse(osv.Model):
                 freq = JobFrequency(data['frequency'])
                 action = data.get('action')
                 timestamp = DateTime(*data['timestamp'])
+                # convert timestamp from server's timezone to UTC
+                timestamp = timestamp.replace(tzinfo=SERVER_TIMEZONE).astimezone(UTC)
                 if not action:
                     if freq is URGENT:
                         action = 'trip'
@@ -1185,7 +1188,7 @@ class pulse_beat(osv.Model):
     an instance of a pulse
     """
     _name = 'ip_network.pulse.beat'
-    _order = 'timestamp desc, name asc'
+    _order = 'name desc'
 
     def _calc_name(self, cr, uid, ids, field_name, arg, context):
         """

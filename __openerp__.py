@@ -22,6 +22,7 @@
             'ip_network_view.xaml',
             'ip_network_data.xaml',
             'wiki_view.xaml',
+	    'wiki_data.xaml',
             'security/ir.model.access.csv',
             'wizard/script_result_view.xaml',
             ],

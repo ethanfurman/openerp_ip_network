@@ -1,0 +1,8 @@
+!!! xml1.0
+
+~openerp
+    ~data noupdate='1'
+
+        ~record #ip_network_wiki_key model='wiki.key'
+                @name: IP-Network
+                @private eval='True'

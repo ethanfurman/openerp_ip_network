@@ -1075,7 +1075,10 @@ class pulse(osv.Model):
             # any pulses?
             for pulse in pulses.get(dev_int_ip, []):
                 if pulse.state is SUSPENDED:
-                    continue
+                    # have we passed the suspended date?
+                    if now < pulse.deadline:
+                        # nope, ignore it
+                        continue
                 new_state = NORMAL
                 beat = pulse.last_seen_id
                 message = 'pulse: %s' % pulse.job

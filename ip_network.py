@@ -1070,12 +1070,12 @@ class pulse(osv.Model):
                 )
         # cycle through the devices
         for dev_int_ip, dev in devices.items():
-            if dev.state is SUSPENDED:
-                continue
             old_clues = [c for c in (dev.clues or '').split('\n') if c]
             new_clues = old_clues[:]
             # any pulses?
             for pulse in pulses.get(dev_int_ip, []):
+                if pulse.state is SUSPENDED:
+                    continue
                 new_state = NORMAL
                 beat = pulse.last_seen_id
                 message = 'pulse: %s' % pulse.job

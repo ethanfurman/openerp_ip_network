@@ -95,11 +95,12 @@ CONTINUOUS, INTERMITTENT, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = Jo
 JF = JobFrequency
 
 class JobStatus(fields.SelectionEnum):
-    _order_ = 'normal overdue failed'
-    normal = 'waiting for next beat'
-    overdue = 'next beat is overdue'
-    failed = 'priority job has failed'
-NORMAL, OVERDUE, FAILED = JobStatus
+    _order_ = 'normal overdue failed sleeping'
+    normal = 'Waiting for next beat.'
+    overdue = 'Next beat is overdue.'
+    failed = 'Priority job has failed.'
+    sleeping = 'Temporarily suspended.'
+NORMAL, OVERDUE, FAILED, SUSPENDED = JobStatus
 
 class BeatAction(fields.SelectionEnum):
     _order_ = 'ping alert trip clear'
@@ -995,9 +996,12 @@ class pulse(osv.Model):
             ),
         'deadline': fields.function(
             _process_timestamps,
+            fnct_inv=True,
             type='datetime',
             string='Next due',
             multi='timestamp',
+            readonly=True,
+            states={'sleeping': [('readonly', False)]},
             store={
                 'ip_network.pulse.beat': (_get_pulse_ids_from_beat, ['timestamp'], 10),
                 },
@@ -1012,6 +1016,109 @@ class pulse(osv.Model):
     _sql_constraints = [
         ('identifier_uniq', 'unique(ip_addr,job)', 'job already exists'),
         ]
+
+    def check_grace_periods(self, cr, uid, arg=None, context=None, ids=None):
+        """
+        runs every five minutes to check for overdue jobs
+
+        will change ip_device.status to/from `fix` and add pulse job name to ip_device.clues
+        if frequency is `alert`, send an email/text-message
+        """
+        # - collect all pulses that are late (deadline is earlier than right now)
+        # - collect all pulses of type `urgent`
+        # - collect devices that match the pulses' IP address
+        # - craft the device status message
+        # - for `ping` pulses:
+        #   - if the message is not in the `clues` fields, add it
+        #   - if the device status is not currently `fix`, change it to `fix`
+        # - for `urgent` pulses:
+        #   - get beats and sort by timestamp
+        #   - if latest beat action is `alert`, all three below; if `trip`, skip the "send message":
+        #     - send message and change device status
+        #     - ensure message is in `clues`
+        #     - ensure device status is `fix`
+        #
+        # - collect all devices with a status of `fix` (except the ones we just changed to `fix`)
+        # - while "pulse" is in the device's status:
+        #   - extract pulse name from status message
+        #   - look up pulse
+        #   - if action is `clear` or `deadline` is later than right now:
+        #     - remove pulse from `clues`
+        #     - change device status to `good` if no other clues
+        #
+        # - a pulse message: "pulse: <job name>"
+        #
+        now = fields.datetime.now(self, cr)
+        network_device = self.pool.get('ip_network.device')
+        # collect all the pulses (which are jobs, the beats are the instances of pulses)
+        pulses = {}
+        for p in self.browse(cr, uid, [(1,'=',1)], context=context):
+            pulses.setdefault(p.ip_addr_as_int, []).append(p)
+        #
+        # handle pulses / devices
+        #
+        # - get all devices and store current `clues` field, plus a copy
+        # - for each device
+        #   - check if any current pulse warnings have been resolved
+        #   - check if any pulses are past due
+        #   - calculate differences between orginal `clues` and updated `clues`, and update OpenERP
+        #
+        # collect all the devices
+        devices = dict(
+                (d.ip_addr_as_int, d)
+                for d in network_device.browse(cr, uid, [(1,'=',1)], context=context)
+                )
+        # cycle through the devices
+        for dev_int_ip, dev in devices.items():
+            if dev.state is SUSPENDED:
+                continue
+            old_clues = [c for c in (dev.clues or '').split('\n') if c]
+            new_clues = old_clues[:]
+            # any pulses?
+            for pulse in pulses.get(dev_int_ip, []):
+                new_state = NORMAL
+                beat = pulse.last_seen_id
+                message = 'pulse: %s' % pulse.job
+                # if beat action is PING, compare next expected date with now to see if it missed
+                # checking in
+                if beat.action == PING:
+                    if now > pulse.deadline:
+                        # make sure message is in clues
+                        if message not in new_clues:
+                            new_clues.insert(0, message)
+                        # make sure status is OVERDUE
+                        new_state = OVERDUE
+                    else:
+                        # make sure message _is not_ in clues
+                        if message in new_clues:
+                            new_clues.remove(message)
+                elif beat.action in (ALERT, TRIP):
+                    new_state = FAILED
+                    if message not in new_clues:
+                        new_clues.insert(0, message)
+                    if beat.action is ALERT:
+                        # TODO: notify via text message
+                        pass
+                else: # beat action must be CLEAR
+                    if message in new_clues:
+                        new_clues.remove(message)
+                # make sure status is current
+                if pulse.state is not new_state:
+                    self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
+            # processed all the pulses for this device -- have the clues changed?
+            if sorted(old_clues) != sorted(new_clues):
+                values = {
+                        'clues': '\n'.join(new_clues),
+                        'status': (GOOD, DANGER)[bool(new_clues)],
+                        }
+                network_device.write(cr, uid, dev.id, values, context=context)
+        return True
+
+    def onchange_state(self, cr, uid, id, new_state, context=None):
+        res = {}
+        if new_state not in ('normal', 'sleeping'):
+            res['value'] = {'state': 'normal'}
+        return res
 
     def process_message_files(self, cr, uid, arg=None, context=None, ids=None):
         errors = []
@@ -1069,101 +1176,6 @@ class pulse(osv.Model):
             _logger.error("file: %r, exc: %r", *err)
         return True
 
-
-    def check_grace_periods(self, cr, uid, arg=None, context=None, ids=None):
-        """
-        runs every five minutes to check for overdue jobs
-
-        will change ip_device.status to/from `fix` and add pulse job name to ip_device.clues
-        if frequency is `alert`, send an email/text-message
-        """
-        # - collect all pulses that are late (deadline is earlier than right now)
-        # - collect all pulses of type `urgent`
-        # - collect devices that match the pulses' IP address
-        # - craft the device status message
-        # - for `ping` pulses:
-        #   - if the message is not in the `clues` fields, add it
-        #   - if the device status is not currently `fix`, change it to `fix`
-        # - for `urgent` pulses:
-        #   - get beats and sort by timestamp
-        #   - if latest beat action is `alert`, all three below; if `trip`, skip the "send message":
-        #     - send message and change device status
-        #     - ensure message is in `clues`
-        #     - ensure device status is `fix`
-        #
-        # - collect all devices with a status of `fix` (except the ones we just changed to `fix`)
-        # - while "pulse" is in the device's status:
-        #   - extract pulse name from status message
-        #   - look up pulse
-        #   - if action is `clear` or `deadline` is later than right now:
-        #     - remove pulse from `clues`
-        #     - change device status to `good` if no other clues
-        #
-        # - a pulse message: "pulse: <job name>"
-        #
-        now = fields.datetime.now(self, cr)
-        network_device = self.pool.get('ip_network.device')
-        # collect all the pulses (which are jobs, the beats are the instances of pulses)
-        pulses = {}
-        for p in self.browse(cr, uid, [(1,'=',1)], context=context):
-            pulses.setdefault(p.ip_addr_as_int, []).append(p)
-        #
-        # handle pulses / devices
-        #
-        # - get all devices and store current `clues` field, plus a copy
-        # - for each device
-        #   - check if any current pulse warnings have been resolved
-        #   - check if any pulses are past due
-        #   - calculate differences between orginal `clues` and updated `clues`, and update OpenERP
-        #
-        # collect all the devices
-        devices = dict(
-                (d.ip_addr_as_int, d)
-                for d in network_device.browse(cr, uid, [(1,'=',1)], context=context)
-                )
-        # cycle through the devices
-        for dev_int_ip, dev in devices.items():
-            old_clues = [c for c in (dev.clues or '').split('\n') if c]
-            new_clues = old_clues[:]
-            # any pulses?
-            for pulse in pulses.get(dev_int_ip, []):
-                new_state = NORMAL
-                beat = pulse.last_seen_id
-                message = 'pulse: %s' % pulse.job
-                # if beat action is PING, compare next expected date with now to see if it missed
-                # checking in
-                if beat.action == PING:
-                    if now > pulse.deadline:
-                        # make sure message is in clues
-                        if message not in new_clues:
-                            new_clues.insert(0, message)
-                        # make sure status is OVERDUE
-                        new_state = OVERDUE
-                    else:
-                        # make sure message _is not_ in clues
-                        if message in new_clues:
-                            new_clues.remove(message)
-                elif beat.action in (ALERT, TRIP):
-                    new_state = FAILED
-                    if message not in new_clues:
-                        new_clues.insert(0, message)
-                    if beat.action is ALERT:
-                        # TODO: notify via text message
-                        pass
-                else: # beat action must be CLEAR
-                    if message in new_clues:
-                        new_clues.remove(message)
-                # make sure status is current
-                if pulse.state is not new_state:
-                    self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
-            # processed all the pulses for this device -- have the clues changed?
-            if sorted(old_clues) != sorted(new_clues):
-                values = {
-                        'clues': '\n'.join(new_clues),
-                        'status': (GOOD, DANGER)[bool(new_clues)],
-                        }
-                network_device.write(cr, uid, dev.id, values, context=context)
-        return True
 
     def purge_pulse_beats(self, cr, uid, arg=None, context=None, ids=None):
         # should be run every half-hour

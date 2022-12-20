@@ -26,20 +26,38 @@
                             @name
                         ~group
                             @source_type .oe_edit_only widget='radio' options="{'horizontal': 1}"
+                            @top_level .oe_edit_only
                         ~div attrs="{'invisible': [('source_type','!=','txt')]}"
                             @source_doc .oe_edit_only placeholder="wiki document..."
                             @wiki_doc .oe_view_only
                         ~div attrs="{'invisible': [('source_type','!=','img')]}"
-                            @source_img widget='image'
+                            @source_img widget='image' .oe_edit_only
+                            @wiki_img widget='image' .oe_view_only
                         ~div
                             ~hr
                             @reverse_links .oe_view_only widget='many2many_tags'
+
+        ~record model=view #view_ip_network_wiki_search
+            @name: ip_network.wiki.search
+            @model: ip_network.wiki
+            @arch type='xml'
+                ~search $Wiki_Page
+                    ~filter $Top_Level_Pages @type_top_level domain="[('top_level','=',True)]"
+                    ~separator
+                    ~filter $Documents @type_document domain="[('source_type','=','txt')]"
+                    ~filter $Images @type_images domain="[('source_type','=','img')]"
+                    ~separator
+                    ~filter $Empty @type_empty domain="[('is_empty','=',True)]"
+                    ~filter $Not_Empty @type_not_empty domain="[('is_empty','=',False)]"
 
         ~record model=action #action_ip_network_wiki
             @name: Wiki
             @res_model: = wiki
             @view_type: form
             @view_id ref='view_ip_network_wiki_tree'
+            @seach_id ref='view_ip_network_wiki_search'
             @view_mode: tree,form
+            @context: {'search_default_type_top_level':'1'}
 
-        ~menuitem @Wiki #menu_ip_network_wiki parent='menu_ip_network' action='action_ip_network_wiki' sequence='40'
+
+        ~menuitem @Wiki #menu_ip_network_wiki parent='menu_ip_network_it' action='action_ip_network_wiki' sequence='10'

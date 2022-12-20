@@ -18,9 +18,9 @@
 
         // menus
 
-        ~menuitem name='Information Technology' #menu_ip_network_it groups=apm_user parent='base.menu_reporting'
+        ~menuitem name='IT Support' #menu_ip_network_it groups=apm_user parent='base.menu_reporting'
 
-        ~menuitem @Network #menu_ip_network groups=apm_user parent='menu_ip_network_it'
+        ~menuitem name='IP Assignments' #menu_ip_network groups=apm_user parent='menu_ip_network_it' sequence='30'
 
         ~menuitem @Configuration #menu_ip_network_conf parent='menu_ip_network_it' sequence='90'
 
@@ -31,7 +31,7 @@
             @name: ip_network.network.tree
             @model: = network
             @arch type='xml'
-                ~tree $IP_Map_Networks
+                ~tree $IP_Networks
                     @name
                     @network
 
@@ -39,7 +39,7 @@
             @name: ip_network.network.form
             @model: = network
             @arch type='xml'
-                ~form $IP_Map_Networks version='7.0'
+                ~form $IP_Networks version='7.0'
                     ~group
                         ~group
                             @name
@@ -63,7 +63,7 @@
             @name: ip_network.device.tree
             @model: = device
             @arch type='xml'
-                ~tree $IP_Map_Devices
+                ~tree $IP_Devices
                     @ip_addr
                     @name
                     @type_id
@@ -74,7 +74,7 @@
             @name: ip_network.device.form
             @model: = device
             @arch type='xml'
-                ~form $IP_Map_Devices version='7.0'
+                ~form $IP_Devices version='7.0'
                     ~header
                         ~button @button_ignore $Retire .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','not in',['offline','unknown'])]}"
                         ~button @button_activate $Activate .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','!=','retired')]}"
@@ -161,7 +161,7 @@
             @name: ip_network.pulse.tree
             @model: = pulse
             @arch type='xml'
-                ~tree $IP_Map_Devices colors="black:state=='normal';red:state!='normal'"
+                ~tree $IP_Devices colors="black:state=='normal';red:state!='normal'"
                     @state invisible='1'
                     @name
                     @frequency
@@ -314,7 +314,7 @@
             @name: ip_network.extra.command.tree
             @model: = command
             @arch type='xml'
-                ~tree $IP_Map_Commands
+                ~tree $IP_Commands
                     @name
                     @where
                     @sequence
@@ -324,7 +324,7 @@
             @name: ip_network.extra.command.form
             @model: = command
             @arch type='xml'
-                ~form $IP_Map_Commands version='7.0'
+                ~form $IP_Commands version='7.0'
                     ~group
                         ~group
                             @id invisible='1'
@@ -422,3 +422,4 @@
             @arch type='xml'
                 ~group @short_fields position='inside'
                     temp text
+

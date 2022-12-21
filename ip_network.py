@@ -82,7 +82,8 @@ class DeviceTypeSource(fields.SelectionEnum):
     system = "System controlled"
 
 class JobFrequency(fields.SelectionEnum):
-    _order_ = 'continuous intermittent daily weekly monthly quarterly yearly urgent'
+    _order_ = 'historical continuous intermittent daily weekly monthly quarterly yearly urgent'
+    historical = "no longer running"
     continuous = "multiple times per hour"
     intermittent = "multiple times per day"
     daily = "once a day jobs"
@@ -91,7 +92,7 @@ class JobFrequency(fields.SelectionEnum):
     quarterly = "once a quarter jobs"
     yearly = "once a year jobs"
     urgent = "single event occurance (store value for trip, alert, and clear)"
-CONTINUOUS, INTERMITTENT, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
+HISTORICAL, CONTINUOUS, INTERMITTENT, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
 JF = JobFrequency
 
 class JobStatus(fields.SelectionEnum):
@@ -1074,6 +1075,9 @@ class pulse(osv.Model):
             new_clues = old_clues[:]
             # any pulses?
             for pulse in pulses.get(dev_int_ip, []):
+                if pulse.state is HISTORICAL:
+                    # no longer running
+                    continue
                 if pulse.state is SUSPENDED:
                     # have we passed the suspended date?
                     if now < pulse.deadline:

@@ -82,8 +82,7 @@ class DeviceTypeSource(fields.SelectionEnum):
     system = "System controlled"
 
 class JobFrequency(fields.SelectionEnum):
-    _order_ = 'historical continuous intermittent daily weekly monthly quarterly yearly urgent'
-    historical = "no longer running"
+    _order_ = 'continuous intermittent daily weekly monthly quarterly yearly urgent'
     continuous = "multiple times per hour"
     intermittent = "multiple times per day"
     daily = "once a day jobs"
@@ -92,16 +91,17 @@ class JobFrequency(fields.SelectionEnum):
     quarterly = "once a quarter jobs"
     yearly = "once a year jobs"
     urgent = "single event occurance (store value for trip, alert, and clear)"
-HISTORICAL, CONTINUOUS, INTERMITTENT, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
+CONTINUOUS, INTERMITTENT, DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY, URGENT = JobFrequency
 JF = JobFrequency
 
 class JobStatus(fields.SelectionEnum):
-    _order_ = 'normal overdue failed sleeping'
+    _order_ = 'normal overdue failed sleeping historical'
     normal = 'Waiting for next beat.'
     overdue = 'Next beat is overdue.'
     failed = 'Priority job has failed.'
     sleeping = 'Temporarily suspended.'
-NORMAL, OVERDUE, FAILED, SUSPENDED = JobStatus
+    historical = "no longer running"
+NORMAL, OVERDUE, FAILED, SUSPENDED, HISTORICAL = JobStatus
 
 class BeatAction(fields.SelectionEnum):
     _order_ = 'ping alert trip clear'
@@ -1075,20 +1075,19 @@ class pulse(osv.Model):
             new_clues = old_clues[:]
             # any pulses?
             for pulse in pulses.get(dev_int_ip, []):
-                if pulse.state is HISTORICAL:
-                    # no longer running
-                    continue
-                if pulse.state is SUSPENDED:
-                    # have we passed the suspended date?
-                    if now < pulse.deadline:
-                        # nope, ignore it
-                        continue
                 new_state = NORMAL
                 beat = pulse.last_seen_id
                 message = 'pulse: %s' % pulse.job
-                # if beat action is PING, compare next expected date with now to see if it missed
-                # checking in
-                if beat.action == PING:
+                if pulse.state in (HISTORICAL, SUSPENDED):
+                    _logger.warning('inactive pulse: %r', message)
+                    new_state = pulse.state
+                    # make sure message _is not_ in clues
+                    if message in new_clues:
+                        _logger.warning('removing %r from clues', message)
+                        new_clues.remove(message)
+                elif beat.action == PING:
+                    # if beat action is PING, compare next expected date with now to see if it missed
+                    # checking in
                     if now > pulse.deadline:
                         # make sure message is in clues
                         if message not in new_clues:
@@ -1114,6 +1113,7 @@ class pulse(osv.Model):
                     self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
             # processed all the pulses for this device -- have the clues changed?
             if sorted(old_clues) != sorted(new_clues):
+                _logger.warning('updating status to %r', (GOOD, DANGER)[bool(new_clues)])
                 values = {
                         'clues': '\n'.join(new_clues),
                         'status': (GOOD, DANGER)[bool(new_clues)],

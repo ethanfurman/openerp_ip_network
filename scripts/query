@@ -21,6 +21,7 @@ from scription import *
 from openerplib import get_connection, get_records, AttrDict
 from openerplib import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT
 from openerplib.dates import datetime_to_str, utc_datetime
+from pprint import pformat
 from Queue import Queue, Empty
 from threading import Thread, Lock#, active_count#, current_thread
 from traceback import format_exc
@@ -619,7 +620,7 @@ def single_command(command, results, errors, address):
             'ref':Type,
             'Type':Type,
             'device_type':device_type,
-            'ip_addr':address,
+            'ip_addr':str(address),
             'Execute':Execute,
             'cmd_name': command.name,
             'Blocks':Blocks,
@@ -627,9 +628,10 @@ def single_command(command, results, errors, address):
             'clock':lambda: datetime_to_str(utc_datetime()),
             're':re,
             }
-    print((results.items()), border='table', verbose=3)
+    _logger.debug('before results:\n%s' % pformat(results))
     try:
         exec(command.script, sandbox)
+        _logger.debug('after results:\n%s' % pformat(results))
         for field_name, subdict in sandbox['result'].items():
             print('-----', verbose=3)
             print('field_name: %r' % (field_name, ), verbose=3)

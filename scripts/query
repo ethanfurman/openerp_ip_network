@@ -21,6 +21,7 @@ from scription import *
 from openerplib import get_connection, get_records, AttrDict
 from openerplib import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT
 from openerplib.dates import datetime_to_str, utc_datetime
+from pprint import pformat
 from Queue import Queue, Empty
 from threading import Thread, Lock#, active_count#, current_thread
 from traceback import format_exc
@@ -391,6 +392,7 @@ def update_openerp(ip, results):
             if 'type_id' not in values:
                 # must be unknown
                 values['type_id'] = Type.unknown
+            values['type_source'] = oe.device.DeviceTypeSource.system
             print('[%15.5f]  creating device for %s' % (time.time()-START, ip), verbose=2)
             print('                   using: %r' % (values, ), verbose=3)
             try:
@@ -527,7 +529,6 @@ def single_command(command, results, errors, address):
     print('[%15.5f]  processing %r' % (time.time()-START, command.name))
     commandline = command.command % {'ip':address}
     if command.where == 'ssh':
-        remove_first_line = True
         password = NETWORK_PW
         pty = True
         commandline = (
@@ -535,7 +536,6 @@ def single_command(command, results, errors, address):
             + commandline
             ) % {'ip':address}
     else:
-        remove_first_line = False
         password = None
         pty = False
     _logger.debug('%r; command line: %r', address, commandline)
@@ -558,13 +558,15 @@ def single_command(command, results, errors, address):
     job = Job(commandline, pty=pty)
     failed = None
     try:
-        job.communicate(timeout=SCAN_TIMEOUT, password=password)
+        job.communicate(timeout=60, password=password)
     except FailedPassword as failed:
         pass
     except Exception as failed:
         pass
     finally:
         job.close()
+    if failed is not None:
+        print('failed: %s' % failed, verbose=3)
     _logger.debug('%r; return code: %r\n%s', address, job.returncode, job.stdout + '\n-------\n' + job.stderr)
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -572,8 +574,9 @@ def single_command(command, results, errors, address):
     if not job.returncode and elapsed_time > max_elapsed:
         max_elapsed = elapsed_time
         grid.display_after_grid('%s took %s to run' % (command.name, seconds2time(elapsed_time)), status=True)
+    print('job stdout: %r' % job.stdout.strip(), verbose=3)
     lines = job.stdout.strip().split('\n')
-    if '[sudo]' in lines[0] or remove_first_line:
+    if '[sudo]' in lines[0] or password and password in lines[0]:
         lines.pop(0)
     text = '\n'.join(lines)
     if job.returncode:
@@ -617,7 +620,7 @@ def single_command(command, results, errors, address):
             'ref':Type,
             'Type':Type,
             'device_type':device_type,
-            'ip_addr':address,
+            'ip_addr':str(address),
             'Execute':Execute,
             'cmd_name': command.name,
             'Blocks':Blocks,
@@ -625,9 +628,10 @@ def single_command(command, results, errors, address):
             'clock':lambda: datetime_to_str(utc_datetime()),
             're':re,
             }
-    print(results, border='flag', verbose=3)
+    _logger.debug('before results:\n%s' % pformat(results))
     try:
         exec(command.script, sandbox)
+        _logger.debug('after results:\n%s' % pformat(results))
         for field_name, subdict in sandbox['result'].items():
             print('-----', verbose=3)
             print('field_name: %r' % (field_name, ), verbose=3)
@@ -643,12 +647,12 @@ def single_command(command, results, errors, address):
         errors.setdefault('by_command', {})[command.name] = address
         raise ScriptError('error processing %s results:\n%s' % (command.name, job_error))
     print('command.name', command.name, verbose=3)
+    print('results', results, verbose=3)
     if command.name == 'Network Search': 
         if 'ip_addr' not in results:
             # make sure ip_addr is set
             results['ip_addr'] = {'value': address}
         # if results['portscan']['status'] is not Status.offline:
-        print('results', results)
         if results['portscan']['status'] is not Status.offline:
             results['last_comms'] = {'value': DateTime.now()}
         else:
@@ -1049,7 +1053,7 @@ stdout_settings = None
 if os.isatty(sys.stdout.fileno()):
     stdout_settings = termios.tcgetattr(sys.stdout.fileno())
 try:
-    Main()
+    Run()
 finally:
     if stdout_settings != None and os.isatty(sys.stdout.fileno()):
         termios.tcsetattr(sys.stdout, termios.TCSADRAIN, stdout_settings)

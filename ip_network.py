@@ -1168,7 +1168,10 @@ class pulse(osv.Model):
             beat_model = self.pool.get('ip_network.pulse.beat')
             pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
             if pulse_jobs:
-                pulse_id = pulse_jobs[0].id
+                pulse_job = pulse_jobs[0]
+                pulse_id = pulse_job.id
+                if pulse_job.frequency != freq:
+                    self.write(cr, uid, {'frequencey': freq}, context=context)
             else:
                 pulse_id = self.create(
                         cr, uid,

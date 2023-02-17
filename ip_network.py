@@ -1018,13 +1018,70 @@ class pulse(osv.Model):
         ('identifier_uniq', 'unique(ip_addr,job)', 'job already exists'),
         ]
 
-    def check_grace_periods(self, cr, uid, arg=None, context=None, ids=None):
-        """
-        runs every five minutes to check for overdue jobs
+    def onchange_state(self, cr, uid, id, new_state, context=None):
+        res = {}
+        if new_state not in ('normal', 'sleeping'):
+            res['value'] = {'state': 'normal'}
+        return res
 
-        will change ip_device.status to/from `fix` and add pulse job name to ip_device.clues
-        if frequency is `alert`, send an email/text-message
-        """
+    def process_message_files(self, cr, uid, arg=None, context=None, ids=None):
+        errors = []
+        file_dir = Path('/home/openerp/sandbox/openerp/var/pulse')
+        archive_dir = file_dir/'archive'
+        if not archive_dir.exists():
+            archive_dir.makedirs()
+        for message_file in file_dir.glob('IP*.txt'):
+            try:
+                with open(message_file) as f:
+                    data = f.read()
+                data = literal_eval(data
+                        .replace('datetime.datetime','')
+                        .replace('datetime.date','')
+                        .replace('datetime.time','')
+                        )
+                job = data['job_name']
+                ip = data['ip_address']
+                freq = JobFrequency(data['frequency'])
+                action = data.get('action')
+                timestamp = DateTime(*data['timestamp'])
+                # convert timestamp from server's timezone to UTC
+                timestamp = timestamp.replace(tzinfo=SERVER_TIMEZONE).astimezone(UTC)
+                if not action:
+                    if freq is URGENT:
+                        action = 'trip'
+                    else:
+                        action = 'ping'
+                beat_model = self.pool.get('ip_network.pulse.beat')
+                pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
+                if pulse_jobs:
+                    pulse_job = pulse_jobs[0]
+                    pulse_id = pulse_job.id
+                    if pulse_job.frequency != freq:
+                        self.write(cr, uid, pulse_id, {'frequency': freq}, context=context)
+                else:
+                    pulse_id = self.create(
+                            cr, uid,
+                            {'job': job, 'ip_addr': ip, 'frequency': freq, 'last_seen': timestamp},
+                            context=context,
+                            )
+                beat_model.create(cr, uid, {'pulse_id':pulse_id, 'timestamp':timestamp, 'action':action}, context=context)
+                try:
+                    message_file.copy(archive_dir)
+                except Exception:
+                    _logger.exception('failure copying file')
+                finally:
+                    message_file.unlink()
+                #
+                # TODO send text-message/email for each device in urgent
+                #
+            except Exception as exc:
+                _logger.exception('exception raised')
+                errors.append((message_file, exc))
+        for err in errors:
+            _logger.error("file: %r, exc: %r", *err)
+        #
+        # now check grace periods
+        #
         # - collect all pulses that are late (deadline is earlier than right now)
         # - collect all pulses of type `urgent`
         # - collect devices that match the pulses' IP address
@@ -1075,19 +1132,20 @@ class pulse(osv.Model):
             new_clues = old_clues[:]
             # any pulses?
             for pulse in pulses.get(dev_int_ip, []):
+                if pulse.state is HISTORICAL:
+                    # no longer running
+                    continue
+                if pulse.state is SUSPENDED:
+                    # have we passed the suspended date?
+                    if now < pulse.deadline:
+                        # nope, ignore it
+                        continue
                 new_state = NORMAL
                 beat = pulse.last_seen_id
                 message = 'pulse: %s' % pulse.job
-                if pulse.state in (HISTORICAL, SUSPENDED):
-                    _logger.warning('inactive pulse: %r', message)
-                    new_state = pulse.state
-                    # make sure message _is not_ in clues
-                    if message in new_clues:
-                        _logger.warning('removing %r from clues', message)
-                        new_clues.remove(message)
-                elif beat.action == PING:
-                    # if beat action is PING, compare next expected date with now to see if it missed
-                    # checking in
+                # if beat action is PING, compare next expected date with now to see if it missed
+                # checking in
+                if beat.action == PING:
                     if now > pulse.deadline:
                         # make sure message is in clues
                         if message not in new_clues:
@@ -1113,77 +1171,11 @@ class pulse(osv.Model):
                     self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
             # processed all the pulses for this device -- have the clues changed?
             if sorted(old_clues) != sorted(new_clues):
-                _logger.warning('updating status to %r', (GOOD, DANGER)[bool(new_clues)])
                 values = {
                         'clues': '\n'.join(new_clues),
                         'status': (GOOD, DANGER)[bool(new_clues)],
                         }
                 network_device.write(cr, uid, dev.id, values, context=context)
-        return True
-
-    def onchange_state(self, cr, uid, id, new_state, context=None):
-        res = {}
-        if new_state not in ('normal', 'sleeping'):
-            res['value'] = {'state': 'normal'}
-        return res
-
-    def process_message_files(self, cr, uid, arg=None, context=None, ids=None):
-        errors = []
-        file_dir = Path('/home/openerp/sandbox/openerp/var/pulse')
-        archive_dir = file_dir/'archive'
-        if not archive_dir.exists():
-            archive_dir.makedirs()
-        for message_file in file_dir.glob('IP*.txt'):
-            with open(message_file) as f:
-                data = f.read()
-            # we only get one shot, move the file into archives
-            try:
-                message_file.copy(archive_dir)
-            except Exception:
-                _logger.exception('failure copying file')
-            finally:
-                message_file.unlink()
-            try:
-                data = literal_eval(data
-                        .replace('datetime.datetime','')
-                        .replace('datetime.date','')
-                        .replace('datetime.time','')
-                        )
-                job = data['job_name']
-                ip = data['ip_address']
-                freq = JobFrequency(data['frequency'])
-                action = data.get('action')
-                timestamp = DateTime(*data['timestamp'])
-                # convert timestamp from server's timezone to UTC
-                timestamp = timestamp.replace(tzinfo=SERVER_TIMEZONE).astimezone(UTC)
-                if not action:
-                    if freq is URGENT:
-                        action = 'trip'
-                    else:
-                        action = 'ping'
-            except Exception as exc:
-                _logger.exception('exception raised')
-                errors.append((message_file, exc))
-                continue
-            beat_model = self.pool.get('ip_network.pulse.beat')
-            pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
-            if pulse_jobs:
-                pulse_job = pulse_jobs[0]
-                pulse_id = pulse_job.id
-                if pulse_job.frequency != freq:
-                    self.write(cr, uid, {'frequencey': freq}, context=context)
-            else:
-                pulse_id = self.create(
-                        cr, uid,
-                        {'job': job, 'ip_addr': ip, 'frequency': freq, 'last_seen': timestamp},
-                        context=context,
-                        )
-            beat_model.create(cr, uid, {'pulse_id':pulse_id, 'timestamp':timestamp, 'action':action}, context=context)
-            #
-            # TODO send text-message/email for each device in urgent
-            #
-        for err in errors:
-            _logger.error("file: %r, exc: %r", *err)
         return True
 
 

@@ -774,6 +774,9 @@ class remote_scripts(osv.Model):
                 _get_type_and_image,
                 string="Image",
                 type='binary',
+                store={
+                        'ip_network.device.script': (self_ids, ['shebang'], 10),
+                        },
                 multi='type_and_image',
                 help="This field holds the image used for this script type, limited to 1024x1024px",
                 ),
@@ -781,6 +784,9 @@ class remote_scripts(osv.Model):
                 _get_type_and_image,
                 string="Medium-sized image",
                 type="binary",
+                store={
+                        'ip_network.device.script': (self_ids, ['shebang'], 10),
+                        },
                 multi='type_and_image',
                 help="Medium-sized image of this script. It is automatically "\
                      "resized as a 128x128px image, with aspect ratio preserved. "\
@@ -790,6 +796,9 @@ class remote_scripts(osv.Model):
                 _get_type_and_image,
                 string="Small-sized image",
                 type="binary",
+                store={
+                        'ip_network.device.script': (self_ids, ['shebang'], 10),
+                        },
                 multi='type_and_image',
                 help="Small-sized image of this script. It is automatically "\
                      "resized as a 64x64px image, with aspect ratio preserved. "\

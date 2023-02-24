@@ -738,7 +738,7 @@ class remote_scripts(osv.Model):
                     ('/perl', 'Perl', 'perl_icon'),
                     ('/ruby', 'Ruby', 'ruby_icon'),
                     ):
-                if match in shebang:
+                if shebang and match in shebang:
                     value.update(getattr(images, img))
                     value['type'] = type
                     value['has_image'] = True

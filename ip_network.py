@@ -838,6 +838,8 @@ class remote_scripts(osv.Model):
                     timeout=60,
                     password_timeout=10,
                     )
+            if job.returncode:
+                raise Exception('target directory creation failed')
         except Exception as e:
             ctx['exception'] = str(e)
         else:
@@ -852,6 +854,8 @@ class remote_scripts(osv.Model):
                         timeout=60,
                         password_timeout=10,
                         )
+                if job.returncode:
+                    raise Exception('copy failed')
             except Exception as e:
                 ctx['exception'] = str(e)
             else:
@@ -863,6 +867,8 @@ class remote_scripts(osv.Model):
                 try:
                     job = Job(commandline, pty=True)
                     job.communicate(password=CONFIG.network.pw, timeout=60, password_timeout=10)
+                    if job.returncode:
+                        raise Exception('job failed')
                 except Exception as e:
                     ctx['exception'] = str(e)
         view_id = self.pool.get('ir.ui.view').search(cr, uid, [('model','=','ip_network.device.script.rseult')])

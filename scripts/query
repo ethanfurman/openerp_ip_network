@@ -381,7 +381,9 @@ def update_openerp(ip, results):
             values.pop('type_id', None)
         try:
             oe.device.write(device.id, values)
+            print('                   done', verbose=3)
         except Exception as exc:
+            print('                   failed', verbose=3)
             raise UpdateFailure('Unable to update %r [id: %r] [%s]' % (ip, device.id, exc))
     else:
         if values['status'] not in (Status.offline, ):
@@ -394,7 +396,9 @@ def update_openerp(ip, results):
             print('                   using: %r' % (values, ), verbose=3)
             try:
                 oe.device.create(values)
+                print('                   done', verbose=3)
             except Exception as exc:
+                print('                   failed', verbose=3)
                 raise CreateFailure('Unable to create %r [%s]' % (ip, exc))
         else:
             return False
@@ -517,6 +521,7 @@ def process_host(address, commands):
         except Exception:
             output = format_exc().strip()
             errors.setdefault('by_ip', {}).setdefault(address, {}).setdefault(output, []).append('update_openerp')
+    print('          finished processing host', verbose=3)
     return results, errors
 
 
@@ -535,7 +540,6 @@ def single_command(command, results, errors, address):
     else:
         password = None
         pty = False
-        pty = True
     _logger.debug('%r; command line: %r', address, commandline)
     print('[%15.5f]  final command: %r' % (time.time()-START, commandline))
     print('                   Types:', list(Type), verbose=4)

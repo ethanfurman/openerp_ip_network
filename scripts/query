@@ -430,7 +430,7 @@ def process_simultaneous_hosts_commands(commands, addresses, errors, pool_size, 
     grid = Grid(addresses, GUI or 80)
     results = dict([(a, {}) for a in addresses])
     # set up queues for parallel execution
-    with TaskPool(pool_size, delay=90, name='nmap') as pool:
+    with TaskPool(pool_size, delay=delay, name='nmap') as pool:
         submitted = 0
         for seq, ip in enumerate(addresses):
             pool.add_task(process_host, seq, address=ip, commands=commands)
@@ -802,7 +802,7 @@ class TaskPool(object):
         if not isinstance(res, Task):
             # problem occured in TaskPool framework...
             cls, exc, tb = res
-            raise exc.with_traceback(tb)
+            raise_with_traceback(exc, tb)
         return res
 
     def get_task(self):
@@ -890,7 +890,7 @@ class Task(object):
             self.activate()
         if self.error is not None:
             cls, exc, tb = self.error
-            raise exc.with_traceback(tb)
+            raise_with_traceback(exc, tb)
         else:
             return self.result
 

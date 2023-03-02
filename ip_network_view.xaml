@@ -208,11 +208,11 @@
                         ~group
                             @name
                             @filename
-                            ~separator colspan='2'
-                            @run_by_user
-                            @run_as_user
+                            @arguments
                         ~group
                             @active
+                            @run_by_user
+                            @run_as_user
                     ~hr
                     ~div .oe_edit_only
                         ~label for='summary' $Summary

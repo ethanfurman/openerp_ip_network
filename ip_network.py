@@ -730,6 +730,7 @@ class remote_scripts(osv.Model):
         'active': fields.boolean('Active'),
         'filename': fields.char('File name', size=256, readonly=True),
         'shebang': fields.char('Shebang', size=128, readonly=True),
+        'arguments': fields.char('Script Arguments', size=128),
         'type': fields.char('Type', size=24, readonly=True),
         'run_by_user': fields.boolean('Run by user'),
         'run_as_user': fields.boolean('Run as user'),
@@ -808,11 +809,12 @@ class remote_scripts(osv.Model):
             except Exception as e:
                 ctx['exception'] = str(e)
             else:
+                args = script['arguments'].replace('$IP', target_ip)
                 if run_as_user:
                     user = self.pool['res.users'].read(cr, uid, uid, context=ctx)['login']
-                    commandline = 'ssh root@%s "sudo -u %s /tmp/openerp/bin/%s %s"' % (target_ip, user, filename, target_ip)
+                    commandline = 'ssh root@%s "sudo -u %s /tmp/openerp/bin/%s %s"' % (target_ip, user, filename, args)
                 else:
-                    commandline = 'ssh root@%s /tmp/openerp/bin/%s %s' % (target_ip, filename, target_ip)
+                    commandline = 'ssh root@%s /tmp/openerp/bin/%s %s' % (target_ip, filename, args)
                 try:
                     job = Job(commandline, pty=True)
                     job.communicate(password=CONFIG.network.pw, timeout=60, password_timeout=10)
@@ -821,9 +823,13 @@ class remote_scripts(osv.Model):
                 except Exception as e:
                     ctx['exception'] = str(e)
         view_id = self.pool.get('ir.ui.view').search(cr, uid, [('model','=','ip_network.device.script.rseult')])
+        lines = job.stdout.split('\n')
+        if 'root' in lines[0] and 'password' in lines:
+            lines.pop(0)
+        output = '\n'.join(lines)
         ctx['commandline'] = commandline
         ctx['returncode'] = job.returncode
-        ctx['stdout'] = job.stdout
+        ctx['stdout'] = output
         ctx['stderr'] = job.stderr
         return {
             'view_type': 'form',
@@ -1309,6 +1315,7 @@ def get_scripts():
         for script in WS_SCRIPT_LOCATION.glob('*'):
             info = WS_SCRIPTS.setdefault(script.filename, {
                     'filename': script.filename,
+                    'arguments': None,
                     'shebang': None,
                     'name': None,
                     'run_by_user': None,
@@ -1374,6 +1381,12 @@ def get_scripts():
                         else:
                             info['user_runnable'] = match().groups()[0].lower() in ('y', 'yes', 't', 'true')
                         continue
+                    elif match('#\s?OERP.?CMD.?ARGS:\s*(.*)$', line, re.I):
+                        if info['arguments'] is not None:
+                            _logger.warning("%r has multiple `#OERP CMD ARGS` entries", script)
+                        else:
+                            [info['arguments']] = match().groups()
+                        continue
                     # pass all other lines through
                     text.append(line)
                 if info['shebang'] is not None:
@@ -1401,6 +1414,7 @@ def _get_type_and_image(shebang):
     if not shebang:
         # treat as binary
         value.update(getattr(images, 'binary_icon'))
+        value['script'] = '...binary file...'
     else:
         for match, type, img in (
                 ('python', 'Python', 'python_icon'),

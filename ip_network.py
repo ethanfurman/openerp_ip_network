@@ -725,100 +725,49 @@ class remote_scripts(osv.Model):
                 self.write(cr, SUPERUSER_ID, oe_rec['id'], changes, context=all_ctx)
         return script_ids
 
-    def _get_type_and_image(self, cr, uid, ids, names, args, context=None):
-        result = dict.fromkeys(ids, False)
-        for record in self.read(cr, uid, ids, fields=['shebang'], context=context):
-            result[record['id']] = value = {}
-            shebang = record['shebang']
-            for match, type, img in (
-                    ('python', 'Python', 'python_icon'),
-                    ('/bash', 'Bash', 'bash_icon'),
-                    ('/sh', 'Sh', 'sh_icon'),
-                    ('/php', 'PHP', 'php_icon'),
-                    ('/perl', 'Perl', 'perl_icon'),
-                    ('/ruby', 'Ruby', 'ruby_icon'),
-                    ):
-                if shebang and match in shebang:
-                    value.update(getattr(images, img))
-                    value['type'] = type
-                    value['has_image'] = True
-                    break
-            else:
-                value['has_image'] = False
-                value['type'] = False
-                value['image'] = False
-                value['image_medium'] = False
-                value['image_small'] = False
-        return result
-
     _columns = {
-        'name': fields.char('Name', size=64),
+        'name': fields.char('Name', size=64, required=True),
         'active': fields.boolean('Active'),
-        'filename': fields.char('File name', size=256),
+        'filename': fields.char('File name', size=256, readonly=True),
         'shebang': fields.char('Shebang', size=128, readonly=True),
-        'type': fields.function(
-                _get_type_and_image,
-                type='char',
-                string='Type',
-                size=24,
-                store={
-                        'ip_network.device.script': (self_ids, ['shebang'], 10),
-                        },
-                multi='type_and_image',
-                ),
+        'type': fields.char('Type', size=24, readonly=True),
         'run_by_user': fields.boolean('Run by user'),
         'run_as_user': fields.boolean('Run as user'),
-        'script': fields.text('Script'),
+        'script': fields.text('Script', readonly=True),
         # image: all image fields are base64 encoded and PIL-supported
-        'image': fields.function(
-                _get_type_and_image,
-                string="Image",
-                type='binary',
-                store={
-                        'ip_network.device.script': (self_ids, ['shebang'], 10),
-                        },
-                multi='type_and_image',
+        'image': fields.binary(
+                "Image",
                 help="This field holds the image used for this script type, limited to 1024x1024px",
                 ),
-        'image_medium': fields.function(
-                _get_type_and_image,
-                string="Medium-sized image",
-                type="binary",
-                store={
-                        'ip_network.device.script': (self_ids, ['shebang'], 10),
-                        },
-                multi='type_and_image',
-                help="Medium-sized image of this script. It is automatically "\
-                     "resized as a 128x128px image, with aspect ratio preserved. "\
+        'image_medium': fields.binary(
+                "Medium-sized image",
+                help="Medium-sized image of this script. It is automatically "
+                     "resized as a 128x128px image, with aspect ratio preserved. "
                      "Use this field in form views or some kanban views.",
                      ),
-        'image_small': fields.function(
-                _get_type_and_image,
-                string="Small-sized image",
-                type="binary",
-                store={
-                        'ip_network.device.script': (self_ids, ['shebang'], 10),
-                        },
-                multi='type_and_image',
-                help="Small-sized image of this script. It is automatically "\
-                     "resized as a 64x64px image, with aspect ratio preserved. "\
+        'image_small': fields.binary(
+                "Small-sized image",
+                help="Small-sized image of this script. It is automatically "
+                     "resized as a 64x64px image, with aspect ratio preserved. "
                      "Use this field anywhere a small image is required.",
                      ),
-        'has_image': fields.function(
-            _get_type_and_image,
-            string="Image",
-            type="boolean",
-            multi='type_and_image',
-            ),
+        'has_image': fields.boolean("Image"),
+        'summary': fields.text('Summary'),
+        'summary_html': fields.function(
+                stonemark2html,
+                arg='summary',
+                type='html',
+                string='Summary (HTML)',
+                store={
+                    'ip_network.device.script': (self_ids, ['summary'], 10),
+                    }
+                ),
         }
 
     def run_script(self, cr, uid, ids, context=None):
         # copy script to remote machine, run it, display results
         ctx = (context or {}).copy()
-        try:
-            target_ip = ctx['target_ip']
-        except KeyError:
-            raise ERPError('Error', 'Unable to detect IP address.')
+        target_ip = ctx.get('target_ip', 'localhost')
         ctx['ip_addr'] = target_ip
         if isinstance(ids, (int, long)):
             [id] = ids
@@ -828,7 +777,7 @@ class remote_scripts(osv.Model):
         filename = script['filename']
         run_as_user = script['run_as_user']
         try:
-            commandline = 'ssh root@%s "mkdir /opt; mkdir /opt/openerp; mkdir /opt/openerp/bin"' % (target_ip, )
+            commandline = 'ssh root@%s "mkdir -p /tmp/openerp/bin"' % (target_ip, )
             job = Job(
                     commandline,
                     pty=True,
@@ -844,7 +793,7 @@ class remote_scripts(osv.Model):
             ctx['exception'] = str(e)
         else:
             try:
-                commandline = 'scp -p %s root@%s:/opt/openerp/bin/' % (WS_SCRIPT_LOCATION / filename, target_ip)
+                commandline = 'scp -p %s root@%s:/tmp/openerp/bin/' % (WS_SCRIPT_LOCATION / filename, target_ip)
                 job = Job(
                         commandline,
                         pty=True,
@@ -861,9 +810,9 @@ class remote_scripts(osv.Model):
             else:
                 if run_as_user:
                     user = self.pool['res.users'].read(cr, uid, uid, context=ctx)['login']
-                    commandline = 'ssh root@%s "sudo -u %s /opt/openerp/bin/%s %s"' % (target_ip, user, filename, target_ip)
+                    commandline = 'ssh root@%s "sudo -u %s /tmp/openerp/bin/%s %s"' % (target_ip, user, filename, target_ip)
                 else:
-                    commandline = 'ssh root@%s /opt/openerp/bin/%s %s' % (target_ip, filename, target_ip)
+                    commandline = 'ssh root@%s /tmp/openerp/bin/%s %s' % (target_ip, filename, target_ip)
                 try:
                     job = Job(commandline, pty=True)
                     job.communicate(password=CONFIG.network.pw, timeout=60, password_timeout=10)
@@ -1385,40 +1334,59 @@ def get_scripts():
                 text = []
                 with script.open() as i:
                     data = i.read().split('\n')
+                looking = True
                 for line in data:
-                    if line.startswith('#!'):
+                    if not looking:
+                        pass
+                    elif line[:1] != '#':
+                        # stop processing at first non-comment line
+                        looking = False
+                        # if this is a zip app, stop storing lines
+                        if line[:4] == 'PK\x03\x04':
+                            text.append('...zip app file...')
+                            break
+                    elif line.startswith('#!'):
                         if info['shebang'] is not None:
                             _logger.warning('%r has multiple shebang lines', script)
                         else:
                             info['shebang'] = line
-                        text.append(line)
                     elif match('#\s?OERP.?NAME:\s*(.*)$', line, re.I):
                         if info['name'] is not None:
                             _logger.warning("%r has multiple `#OERP NAME` entries", script)
                         else:
                             [info['name']] = match().groups()
+                        continue
                     elif match('#\s?OERP.?RUN.?BY.?USER.?:\s*(.*)$', line, re.I):
                         if info['run_by_user'] is not None:
                             _logger.warning("%r has multiple `#OERP RUN BY USER` entries", script)
                         else:
                             [info['run_as_user']] = match().groups()
+                        continue
                     elif match('#\s?OERP.?RUN.?AS.?USER.?:\s*(.*)$', line, re.I):
                         if info['run_as_user'] is not None:
                             _logger.warning("%r has multiple `#OERP RUN AS USER` entries", script)
                         else:
                             info['user_runnable'] = match().groups()[0].lower() in ('y', 'yes', 't', 'true')
+                        continue
                     elif match('#\s?OERP.?ACTIVE:\s*(.*)$', line, re.I):
                         if info['run_as_user'] is not None:
                             _logger.warning("%r has multiple `#OERP ACTIVE` entries", script)
                         else:
                             info['user_runnable'] = match().groups()[0].lower() in ('y', 'yes', 't', 'true')
-                    else:
-                        # pass all other lines through
-                        text.append(line)
-                info['script'] = '\n'.join(text)
+                        continue
+                    # pass all other lines through
+                    text.append(line)
+                if info['shebang'] is not None:
+                    info['script'] = '\n'.join(text)
+                else:
+                    info['shebang'] = False
+                    info['script'] = False
+                if info['name'] is None:
+                    info['name'] = script.base
                 for setting in ('run_by_user', 'run_as_user'):
                     if info[setting] is None:
                         info[setting] = False
+                info.update(_get_type_and_image(info['shebang']))
                 # script processed
             for name in WS_SCRIPTS:
                 if name not in seen:
@@ -1426,6 +1394,29 @@ def get_scripts():
                     WS_SCRIPTS[name]['active'] = False
         # return copy of global dict
         return WS_SCRIPTS.copy()
+
+def _get_type_and_image(shebang):
+    # return dictionary with `type`, `image`, `image_medium`, `image_small`, and `has_image` keys
+    value = {}
+    if not shebang:
+        # treat as binary
+        value.update(getattr(images, 'binary_icon'))
+    else:
+        for match, type, img in (
+                ('python', 'Python', 'python_icon'),
+                ('bash', 'Bash', 'bash_icon'),
+                ('php', 'PHP', 'php_icon'),
+                ('perl', 'Perl', 'perl_icon'),
+                ('ruby', 'Ruby', 'ruby_icon'),
+                ('sh', 'Shell', 'sh_icon'),
+                ):
+            if match in shebang:
+                value.update(getattr(images, img))
+                break
+        else:
+            # unknown script
+            value.update(getattr(images, 'unknown_icon'))
+    return value
 
 
 DEVICE_STATUS = {

@@ -809,7 +809,7 @@ class remote_scripts(osv.Model):
             except Exception as e:
                 ctx['exception'] = str(e)
             else:
-                args = script['arguments'].replace('$IP', target_ip)
+                args = (script['arguments'] or '').replace('$IP', target_ip)
                 if run_as_user:
                     user = self.pool['res.users'].read(cr, uid, uid, context=ctx)['login']
                     commandline = 'ssh root@%s "sudo -u %s /tmp/openerp/bin/%s %s"' % (target_ip, user, filename, args)

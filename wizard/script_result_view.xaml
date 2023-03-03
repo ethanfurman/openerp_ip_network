@@ -15,8 +15,11 @@
                     ~group
                         @commandline
                     ~group
-                        @stdout
+                        ~label for='stdout' $stdout
+                        ~pre: ~field @stdout
                     ~group
-                        @stderr
+                        ~label for='stderr' $stderr
+                        ~pre: ~field @stderr
                     ~group
-                        @exception
+                        ~label for='exception' $exception
+                        ~pre: ~field @exception

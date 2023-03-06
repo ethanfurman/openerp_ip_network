@@ -16,10 +16,10 @@
                         @commandline
                     ~group
                         ~label for='stdout' $stdout
-                        ~pre: ~field @stdout
+                        ~pre style='white-space: normal;': ~field @stdout
                     ~group
                         ~label for='stderr' $stderr
-                        ~pre: ~field @stderr
+                        ~pre style='white-space: normal;': ~field @stderr
                     ~group
                         ~label for='exception' $exception
-                        ~pre: ~field @exception
+                        ~pre style='white-space: normal;': ~field @exception

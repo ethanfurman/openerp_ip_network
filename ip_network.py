@@ -824,7 +824,7 @@ class remote_scripts(osv.Model):
                     ctx['exception'] = str(e)
         view_id = self.pool.get('ir.ui.view').search(cr, uid, [('model','=','ip_network.device.script.rseult')])
         lines = job.stdout.split('\n')
-        if 'root' in lines[0] and 'password' in lines:
+        if 'root' in lines[0] and 'password' in lines[0]:
             lines.pop(0)
         output = '\n'.join(lines)
         ctx['commandline'] = commandline

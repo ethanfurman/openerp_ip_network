@@ -76,6 +76,8 @@
             @arch type='xml'
                 ~form $IP_Devices version='7.0'
                     ~header
+                        ~button @update_status $Refresh .oe_view_only type='object' attrs="{'invisible': [('status','=','retired')]}"
+                        @image_small widget='image' nolabel='1' readonly='1' .oe_right .oe_image_thumbnail
                         ~button @button_ignore $Retire .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','not in',['offline','unknown'])]}"
                         ~button @button_activate $Activate .oe_view_only .oe_right type='object' attrs="{'invisible': [('status','!=','retired')]}"
                     ~group
@@ -86,11 +88,8 @@
                             @type_source
                             @last_comms
                         ~group
-                            @image_small widget='image' class='oe_image oe_right' nolabel='1' attrs="{'readonly':True}"
-                            ~div
-                                ~button $Refresh @update_status type='object'
-                                @status attrs="{'readonly':True}"
-                                @clues attrs="{'readonly':True}"
+                            @status attrs="{'readonly':True}"
+                            @clues attrs="{'readonly':True}"
                     ~group @short_fields
                     ~notebook @notebook_fields
                         ~page $WS_Scripts

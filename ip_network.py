@@ -416,6 +416,11 @@ class device(osv.Model):
                 'ip_network.device': (self_ids, ['notes'], 10),
                 }
             ),
+        'pulse_ids': fields.many2many(
+            'ip_network.pulse',
+            'ipnetwork_dev2pulse_rel', 'device_id', 'pulse_id',
+            string='Pulse Issues',
+            ),
         }
 
     _defaults = {
@@ -977,7 +982,12 @@ class pulse(osv.Model):
                 'ip_network.pulse.beat': (_get_pulse_ids_from_beat, ['timestamp'], 10),
                 },
             ),
-        'beat_ids': fields.one2many('ip_network.pulse.beat', 'pulse_id', string='Beats')
+        'beat_ids': fields.one2many('ip_network.pulse.beat', 'pulse_id', string='Beats'),
+        'device_ids': fields.many2many(
+            'ip_network.device',
+            'ipnetwork_dev2pulse_rel', 'pulse_id', 'device_id',
+            string='Device',
+            ),
         }
 
     _defaults = {
@@ -995,11 +1005,21 @@ class pulse(osv.Model):
         return res
 
     def process_message_files(self, cr, uid, arg=None, context=None, ids=None):
+        match = Var(re.match)
         errors = []
         file_dir = Path('/home/openerp/sandbox/openerp/var/pulse')
         archive_dir = file_dir/'archive'
         if not archive_dir.exists():
             archive_dir.makedirs()
+        #
+        # collect all the devices; used both for linking pulses and for checking
+        # grace periods
+        network_device = self.pool.get('ip_network.device')
+        devices = dict(
+                (d.ip_addr_as_int, d)
+                for d in network_device.browse(cr, uid, [(1,'=',1)], context=context)
+                )
+        # process any files
         for message_file in file_dir.glob('IP*.txt'):
             try:
                 with open(message_file) as f:
@@ -1023,6 +1043,7 @@ class pulse(osv.Model):
                         action = 'ping'
                 beat_model = self.pool.get('ip_network.pulse.beat')
                 pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
+                # retrieve or create pulse
                 if pulse_jobs:
                     pulse_job = pulse_jobs[0]
                     pulse_id = pulse_job.id
@@ -1034,6 +1055,19 @@ class pulse(osv.Model):
                             {'job': job, 'ip_addr': ip, 'frequency': freq, 'last_seen': timestamp},
                             context=context,
                             )
+                    # after creating new pulse, link to appropriate devices
+                    # primary device is in `ip`, secondary device is in `job`
+                    q1, q2, q3, q4 = ip.split('.')
+                    primary_as_int = (q1 << 24) + (q2 << 16) + (q3 << 8) + q4
+                    linked_ids = [(4, devices[primary_as_int].id)]
+                    if match(r'(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})', job):
+                        q1, q2, q3, q4 = match.groups()
+                        secondary_as_int = (q1 << 24) + (q2 << 16) + (q3 << 8) + q4
+                        secondary = devices.get(secondary_as_int)
+                        if secondary is not None:
+                            linked_ids.append((4, secondary.id))
+                    self.write(cr, uid, pulse_id, {'device_ids': linked_ids}, context=context)
+                # create beat
                 beat_model.create(cr, uid, {'pulse_id':pulse_id, 'timestamp':timestamp, 'action':action}, context=context)
                 try:
                     message_file.copy(archive_dir)
@@ -1077,7 +1111,6 @@ class pulse(osv.Model):
         # - a pulse message: "pulse: <job name>"
         #
         now = fields.datetime.now(self, cr)
-        network_device = self.pool.get('ip_network.device')
         # collect all the pulses (which are jobs, the beats are the instances of pulses)
         pulses = {}
         for p in self.browse(cr, uid, [(1,'=',1)], context=context):
@@ -1091,17 +1124,13 @@ class pulse(osv.Model):
         #   - check if any pulses are past due
         #   - calculate differences between orginal `clues` and updated `clues`, and update OpenERP
         #
-        # collect all the devices
-        devices = dict(
-                (d.ip_addr_as_int, d)
-                for d in network_device.browse(cr, uid, [(1,'=',1)], context=context)
-                )
         # cycle through the devices
         for dev_int_ip, dev in devices.items():
             old_clues = [c for c in (dev.clues or '').split('\n') if c]
-            new_clues = old_clues[:]
+            new_clues = [c for c in old_clues if not c.startswith('pulse: ')]
             # any pulses?
-            for pulse in pulses.get(dev_int_ip, []):
+            count = 0
+            for pulse in dev.pulse_ids:
                 if pulse.state is HISTORICAL:
                     # no longer running
                     continue
@@ -1112,34 +1141,30 @@ class pulse(osv.Model):
                         continue
                 new_state = NORMAL
                 beat = pulse.last_seen_id
-                message = 'pulse: %s' % pulse.job
+                message = 'pulse: %s jobs'
                 # if beat action is PING, compare next expected date with now to see if it missed
                 # checking in
                 if beat.action == PING:
                     if now > pulse.deadline:
                         # make sure message is in clues
-                        if message not in new_clues:
-                            new_clues.insert(0, message)
+                        count += 1
                         # make sure status is OVERDUE
                         new_state = OVERDUE
-                    else:
-                        # make sure message _is not_ in clues
-                        if message in new_clues:
-                            new_clues.remove(message)
                 elif beat.action in (ALERT, TRIP):
                     new_state = FAILED
-                    if message not in new_clues:
-                        new_clues.insert(0, message)
+                    count += 1
                     if beat.action is ALERT:
                         # TODO: notify via text message
                         pass
                 else: # beat action must be CLEAR
-                    if message in new_clues:
-                        new_clues.remove(message)
+                    pass
                 # make sure status is current
                 if pulse.state is not new_state:
                     self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
             # processed all the pulses for this device -- have the clues changed?
+            if count:
+                message %= count
+                new_clues.append(message)
             if sorted(old_clues) != sorted(new_clues):
                 values = {
                         'clues': '\n'.join(new_clues),

@@ -92,6 +92,8 @@
                             @clues attrs="{'readonly':True}"
                     ~group @short_fields
                     ~notebook @notebook_fields
+                        ~page $Pulses
+                            @pulse_ids
                         ~page $WS_Scripts
                             @ws_scripts mode='kanban' context="{'target_ip': ip_addr}"
                         ~page $Misc_Files @misc_files

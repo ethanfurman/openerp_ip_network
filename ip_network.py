@@ -356,7 +356,7 @@ class device(osv.Model):
         'ip_addr': fields.char('IP Address', size=15, required=True),
         'ip_addr_as_int': fields.function(
             _ip2int,
-            type='char',
+            type='char',		# actual integers too big for the backend
             string='IP as int',
             size=10,
             store={
@@ -942,7 +942,7 @@ class pulse(osv.Model):
         'ip_addr': fields.char('IP Address', size=15, required=True),
         'ip_addr_as_int': fields.function(
             _ip2int,
-            type='char',
+            type='char',		# actual integers too big for the backend
             string='IP as int',
             size=10,
             store={
@@ -1062,7 +1062,7 @@ class pulse(osv.Model):
                     linked_ids = [(4, devices[primary_as_int].id)]
                     if match(r'(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})', job):
                         q1, q2, q3, q4 = map(int, match.groups())
-                        secondary_as_int = (q1 << 24) + (q2 << 16) + (q3 << 8) + q4
+                        secondary_as_int = '%010d' % ((q1 << 24) + (q2 << 16) + (q3 << 8) + q4)
                         secondary = devices.get(secondary_as_int)
                         if secondary is not None:
                             linked_ids.append((4, secondary.id))

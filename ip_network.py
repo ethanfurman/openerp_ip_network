@@ -121,7 +121,7 @@ def _ip2int(module, cr, uid, ids, field_name, arg, context):
         if len(quads) != 4:
              raise ERPError('bad ip address', 'ip address should be a dotted quad [got %r]' % (ip_addr, ))
         try:
-            quads = [int(q) for q in quads]
+            quads = map(int, quads)
             if not all([0 <= q <= 255 for q in quads]):
                 raise ValueError
         except ValueError:
@@ -1057,11 +1057,11 @@ class pulse(osv.Model):
                             )
                     # after creating new pulse, link to appropriate devices
                     # primary device is in `ip`, secondary device is in `job`
-                    q1, q2, q3, q4 = ip.split('.')
+                    q1, q2, q3, q4 = map(int, ip.split('.'))
                     primary_as_int = (q1 << 24) + (q2 << 16) + (q3 << 8) + q4
                     linked_ids = [(4, devices[primary_as_int].id)]
                     if match(r'(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})', job):
-                        q1, q2, q3, q4 = match.groups()
+                        q1, q2, q3, q4 = map(int, match.groups())
                         secondary_as_int = (q1 << 24) + (q2 << 16) + (q3 << 8) + q4
                         secondary = devices.get(secondary_as_int)
                         if secondary is not None:

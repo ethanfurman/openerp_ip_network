@@ -1058,7 +1058,7 @@ class pulse(osv.Model):
                     # after creating new pulse, link to appropriate devices
                     # primary device is in `ip`, secondary device is in `job`
                     q1, q2, q3, q4 = map(int, ip.split('.'))
-                    primary_as_int = (q1 << 24) + (q2 << 16) + (q3 << 8) + q4
+                    primary_as_int = '%010d' % ((q1 << 24) + (q2 << 16) + (q3 << 8) + q4)
                     linked_ids = [(4, devices[primary_as_int].id)]
                     if match(r'(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})', job):
                         q1, q2, q3, q4 = map(int, match.groups())

@@ -988,6 +988,7 @@ class pulse(osv.Model):
             'ipnetwork_dev2pulse_rel', 'pulse_id', 'device_id',
             string='Device',
             ),
+        'paused_reason': fields.char('Reason for suspension', size=128),
         }
 
     _defaults = {

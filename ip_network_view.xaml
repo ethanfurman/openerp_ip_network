@@ -177,7 +177,8 @@
                     ~header attrs="{'invisible':[('state','=','normal')]}"
                         ~h2 .oe_highlight .oe_bold .oe_text_center attrs="{'invisible':[('state','!=','overdue')]}": O V E R D U E
                         ~h2 .oe_highlight .oe_bold .oe_text_center attrs="{'invisible':[('state','!=','failed')]}": F A I L E D
-                    @state on_change="onchange_state(state)"
+                    @state on_change="onchange_state(state)" .oe_inline
+                    @paused_reason attrs="{'invisible':[('state','!=','sleeping')]}" placeholder='suspended reason...'
                     ~group
                         ~group
                             @ip_addr

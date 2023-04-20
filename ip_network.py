@@ -98,7 +98,7 @@ class JobStatus(fields.SelectionEnum):
     _order_ = 'normal overdue failed sleeping historical'
     normal = 'Waiting for next beat.'
     overdue = 'Next beat is overdue.'
-    failed = 'Priority job has failed.'
+    failed = 'Job has failed.'
     sleeping = 'Temporarily suspended.'
     historical = "no longer running"
 NORMAL, OVERDUE, FAILED, SUSPENDED, HISTORICAL = JobStatus
@@ -905,27 +905,28 @@ class pulse(osv.Model):
                     continue
                 last_date = DateTime.strptime(last_seen, DEFAULT_SERVER_DATETIME_FORMAT)
                 if freq is CONTINUOUS:
+                    # 30 minute grace period
                     res[pulse_id]['deadline'] = last_date.replace(delta_minute=+30)
                 elif freq is INTERMITTENT:
-                    midday = last_date.replace(hour=12, minute=0, second=0)
-                    midnight = last_date.replace(delta_day=+1, hour=0, minute=0, second=0)
-                    next_midday = midday.replace(delta_day=+1)
-                    if last_date < midday:
-                        res[pulse_id]['deadline'] = midnight
-                    else:
-                        res[pulse_id]['deadline'] = next_midday
+                    # 120 minute grace period between 05:00 - 18:00
+                    eod = last_date.replace(hour=18)
+                    target_date = last_date.replace(delta_hour=+1)
+                    if target_date > eod:
+                        target_date = target_date.replace(delta_day=+1, hour=5, minute=30)
+                    res[pulse_id]['deadline'] = target_date
                 elif freq is DAILY:
-                    res[pulse_id]['deadline'] = last_date.replace(delta_day=+3)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+1, delta_hour=+2))
                 elif freq is WEEKLY:
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+7), days=+2)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+7, delta_hour=+2))
                 elif freq is MONTHLY:
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_month=+1), days=+2)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_month=+1, delta_hour=+2))
                 elif freq is QUARTERLY:
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_month=+3), days=+5)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_month=+3, delta_hour=+2))
                 elif freq is YEARLY:
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_year=+1), days=+5)
+                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_year=+1, delta_hour=+2))
                 else:
-                    res[pulse_id]['deadline'] = last_date(delta_day=-1)
+                    # unknown, make it late
+                    res[pulse_id]['deadline'] = last_date.replace(delta_day=-1)
         return res
 
     _columns = {
@@ -1048,7 +1049,7 @@ class pulse(osv.Model):
                 if pulse_jobs:
                     pulse_job = pulse_jobs[0]
                     pulse_id = pulse_job.id
-                    if pulse_job.frequency != freq:
+                    if freq is not URGENT and pulse_job.frequency != freq:
                         self.write(cr, uid, pulse_id, {'frequency': freq}, context=context)
                 else:
                     pulse_id = self.create(
@@ -1089,7 +1090,7 @@ class pulse(osv.Model):
         #
         # - collect all pulses that are late (deadline is earlier than right now)
         # - collect all pulses of type `urgent`
-        # - collect devices that match the pulses' IP address
+        # - collect devices that match the pulses' IP addresses
         # - craft the device status message
         # - for `ping` pulses:
         #   - if the message is not in the `clues` fields, add it

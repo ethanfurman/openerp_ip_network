@@ -100,11 +100,9 @@ job will check for missing entries, and change the status of the IP device to
 `FIX` if sufficient time has passed:
 
   - continuous jobs have grace periods of 30 minutes
-  - intermittent jobs have grace periods that end at noon and midnight (status
-    changes if the job has not run in the previous 12 hours)
-  - daily jobs have a grace period of two physical days
-  - weekly and monthly jobs have a grace period of two business days
-  - quarterly and yearly jobs have a grace period of five business days
+  - intermittent jobs have grace periods of 60 minutes during business hours
+    (defined as 05:00 - 18:00)
+  - all others have a grace period of 2 hours
 
 Besides the standard frequencies, there is a one-time frequency:  `urgent`.
 The default action for `urgent` is called `trip` and it immediately sets the

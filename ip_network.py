@@ -936,7 +936,7 @@ class pulse(osv.Model):
             type='char',
             size=288,
             store={
-                'ip_network.pulse': (self_ids, ['device','job'], 10),
+                'ip_network.pulse': (self_ids, ['ip_addr','job'], 10),
                 },
             ),
         'state': fields.selection(JobStatus, 'Status', required=True),

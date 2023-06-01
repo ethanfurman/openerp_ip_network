@@ -1194,9 +1194,8 @@ class pulse(osv.Model):
                 archive_dir.unlink(filename)
         # remove excess beats
         pulse_beat = self.pool.get('ip_network.pulse.beat')
-        jobs = {}
-        for pulse in self.browse(cr, uid, [(1,'=',1)], context=context):
-            beats = sorted(pulse.beat_ids, key=lambda rec: rec.timestamp)[:-50]
+        for pulse in self.browse(cr, uid, [('id','!=',0)], context=context):
+            beats = sorted(pulse.beat_ids, key=lambda rec: rec.timestamp)[:-20]
             pulse_beat.unlink(cr, uid, [b.id for b in beats], context=context)
 
 

@@ -1178,6 +1178,8 @@ class pulse(osv.Model):
 
     def purge_pulse_beats(self, cr, uid, arg=None, context=None, ids=None):
         # should be run every half-hour
+        #
+        # remove excess files
         archive_dir = Path('/home/openerp/sandbox/openerp/var/pulse/archive')
         job_files = {}
         count = 0
@@ -1190,6 +1192,12 @@ class pulse(osv.Model):
             for date in files[50:]:
                 filename = '%s-%s.txt' % (job, date)
                 archive_dir.unlink(filename)
+        # remove excess beats
+        pulse_beat = self.pool.get('ip_network.pulse.beat')
+        jobs = {}
+        for pulse in self.browse(cr, uid, [(1,'=',1)], context=context):
+            beats = sorted(pulse.beat_ids, key=lambda rec: rec.timestamp)[:-50]
+            pulse_beat.unlink(cr, uid, [b.id for b in beats], context=context)
 
 
 class pulse_beat(osv.Model):

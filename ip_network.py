@@ -1044,8 +1044,8 @@ class pulse(osv.Model):
                     else:
                         action = 'ping'
                 beat_model = self.pool.get('ip_network.pulse.beat')
-                pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
                 # retrieve or create pulse
+                pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
                 if pulse_jobs:
                     pulse_job = pulse_jobs[0]
                     pulse_id = pulse_job.id

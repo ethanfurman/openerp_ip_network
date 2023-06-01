@@ -1,0 +1,52 @@
+#!/usr/local/bin/suid-python --virtualenv
+"""\
+Integrate existing pulses with the matching devices.
+"""
+
+# imports
+
+from __future__ import print_function
+from scription import *
+from openerplib import get_connection
+import os, re
+
+match = Var(re.search)
+
+VIRTUAL_ENV = os.environ['VIRTUAL_ENV']
+CONFIG = Path('/%s/config/fnx.ini' % VIRTUAL_ENV)
+
+settings = OrmFile(CONFIG).openerp
+oe = get_connection(hostname=settings.host, database=settings.db, login=settings.user, password=settings.pw)
+oe.network = oe.get_model('ip_network.network')
+oe.device = oe.get_model('ip_network.device')
+oe.pulse = oe.get_model('ip_network.pulse')
+
+
+@Command()
+def integrate_pulses():
+    devices = dict(
+            (d.ip_addr_as_int, d.id)
+            for d in oe.device.read([(1,'=',1)], fields=['ip_addr_as_int'])
+            )
+    pulses = dict(
+            (p.ip_addr_as_int, p)
+            for p in oe.pulse.read([(1,'=',1)], fields=['ip_addr','ip_addr_as_int','job'])
+            )
+    print('%d devices\n%d pulses' % (len(devices), len(pulses)), verbose=1)
+    for pulse in ViewProgress(pulses.values()):
+        print('pulse: %r' % pulse, verbose=2)
+        try:
+            linked_ids = [(4, devices[pulse.ip_addr_as_int])]                        # obvious device
+        except KeyError:
+            continue
+        if match(r'(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})', pulse.job):             # possible device
+            q1, q2, q3, q4 = map(int, match.groups())
+            secondary_as_int = str((q1 << 24) + (q2 << 16) + (q3 << 8) + q4)
+            secondary_id = devices.get(secondary_as_int)
+            print(q1, q2, q3, q4, secondary_as_int, secondary_id)
+            if secondary_id is not None:
+                linked_ids.append((4, secondary_id))
+        oe.pulse.write(pulse.id, {'device_ids': linked_ids})
+
+
+Run()

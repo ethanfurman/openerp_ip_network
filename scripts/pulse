@@ -1,29 +1,36 @@
 #!/usr/local/bin/suid-python --virtualenv
-"""\
-Integrate existing pulses with the matching devices.
-"""
 
 # imports
 
 from __future__ import print_function
-from scription import *
-from openerplib import get_connection
 import os, re
+from openerplib import get_connection
+from scandir import scandir
+from scription import *
 
 match = Var(re.search)
 
 VIRTUAL_ENV = os.environ['VIRTUAL_ENV']
 CONFIG = Path('/%s/config/fnx.ini' % VIRTUAL_ENV)
+PULSE = Path('/home/openerp/sandbox/openerp/var/pulse')
+ARCHIVE = PULSE / 'archive'
 
-settings = OrmFile(CONFIG).openerp
-oe = get_connection(hostname=settings.host, database=settings.db, login=settings.user, password=settings.pw)
-oe.network = oe.get_model('ip_network.network')
-oe.device = oe.get_model('ip_network.device')
-oe.pulse = oe.get_model('ip_network.pulse')
+@Script()
+def main():
+    global oe
+    settings = OrmFile(CONFIG).openerp
+    oe = get_connection(hostname=settings.host, database=settings.db, login=settings.user, password=settings.pw)
+    oe.network = oe.get_model('ip_network.network')
+    oe.device = oe.get_model('ip_network.device')
+    oe.pulse = oe.get_model('ip_network.pulse')
+    oe.pulse_beat = oe.get_model('ip_network.pulse.beat')
 
 
 @Command()
-def integrate_pulses():
+def integrate():
+    """
+    Link existing pulses with the matching devices.
+    """
     devices = dict(
             (d.ip_addr_as_int, d.id)
             for d in oe.device.read([(1,'=',1)], fields=['ip_addr_as_int'])
@@ -47,6 +54,27 @@ def integrate_pulses():
             if secondary_id is not None:
                 linked_ids.append((4, secondary_id))
         oe.pulse.write(pulse.id, {'device_ids': linked_ids})
+
+
+@Command()
+def resync():
+    """
+    Ensure latest beat exists in OpenERP.
+    """
+    pulses = dict(
+            (p.name, p)
+            for p in oe.pulse.read([(1,'=',1)], fields=['ip_addr','job','last_seen_id','name'])
+            )
+    beat_files = list(scandir(ARCHIVE))
+    # sort files by pulse
+    for beat_file in ViewProgress(beat_files):
+        pass
+
+
+# helpers
+
+def parse_log_files(*filenames):
+    pass
 
 
 Run()

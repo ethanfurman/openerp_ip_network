@@ -12,7 +12,9 @@
     'depends': [
             'base',
             'fnx',
+            'fnx_fs',
             'mail',
+	    'web',
             'wiki',
             ],
     'css': [

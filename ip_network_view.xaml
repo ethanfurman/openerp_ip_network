@@ -5,6 +5,7 @@
 -action = 'ir.actions.act_window'
 -network = 'ip_network.network'
 -device = 'ip_network.device'
+-screenshot = 'ip_network.device.screenshot'
 -pulse = 'ip_network.pulse'
 -wiki = 'ip_network.wiki'
 -device_script = 'ip_network.device.script'
@@ -103,6 +104,8 @@
                             ~pre
                                 @errors
                             ~button $Remove_Key @button_remove_key type='object' attrs="{'invisible': [('error_host_id_changed','=',False)]}"
+                        ~page $Screen_Shots
+                            @recent_screenshots
                     ~hr
                     ~div
                         ~h4: Notes
@@ -155,6 +158,30 @@
 
         ~menuitem @Devices #menu_ip_network_device parent='menu_ip_network' action='action_ip_network_device' sequence='20'
 
+        // screen shots
+
+        ~record model=view #view_ip_network_device_screenshot_tree
+            @name: ip_network.device.screenshot.tree
+            @model: = screenshot
+            @arch type='xml'
+                ~tree $Screen_Shot version='7.0'
+                    @device_id
+
+        ~record model=view #view_ip_network_device_screenshot_form
+            @name: ip_network.device.screenshot.form
+            @model: = screenshot
+            @arch type='xml'
+                ~form $Screen_Shot version='7.0'
+                    @image widget='image'
+
+        ~record model=action #action_ip_network_device_screenshot
+            @name: Device Screenshots
+            @res_model: = screenshot
+            @view_type: form
+            @view_id ref='view_ip_network_device_screenshot_tree'
+            @view_mode: tree,form
+
+        ~menuitem @ScreenShots #menu_ip_network_device_screenshot parent='menu_ip_network' action='action_ip_network_device_screenshot' sequence='50'
 
         // Pulse
 

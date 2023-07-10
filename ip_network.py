@@ -12,6 +12,7 @@ from openerp.osv.orm import except_orm as ValidateError
 from openerp.exceptions import ERPError
 from openerp.tools import DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, SERVER_TIMEZONE, UTC
 from openerp.tools import self_ids, NamedLock, stonemark2html
+from operator import div
 from osv import orm, osv, fields
 from psycopg2 import ProgrammingError
 from scription import Execute, Job, OrmFile, Var
@@ -334,6 +335,28 @@ class device(osv.Model):
             _logger.error('\n' + '\n'.join(message) + '\n')
         return {'type':'ir.actions.client', 'tag':'reload'}
 
+    def _get_current_screenshots(self, cr, uid, ids, field_name, value, context):
+        "return html snippet with links to latest images"
+        screenshot = '<div><img src="/ip_network/screenshot/retrieve/?ip=%s&file=%s" width="100%%"></div>'
+        res = {}.fromkeys(ids, '')
+        perms, paths = self.fnxfs_field_info(cr, uid, ids, 'screenshots', context=context)
+        for dev_id, root, trunk, branch, leaf in paths:
+            target_path = reduce(div, [p for p in [root, trunk, branch, leaf] if p])
+            if target_path.exists():
+                files = target_path.listdir()
+            else:
+                files = []
+            if not files:
+                res[dev_id] = "<h3>No images found.</h3>"
+                continue
+            device = self.browse(cr, uid, dev_id, context=context)
+            files.sort(reverse=True)
+            snippets = []
+            for f in files[:3]:
+                snippets.append(screenshot % (device.ip_addr, f))
+            res[dev_id] = '\n'.join(snippets)
+        return res
+
     def _get_scripts(self, cr, uid, ids, field_name, arg, context):
         script_ids = self.pool.get('ip_network.device.script')._update_scripts(cr, uid, context=context)
         res = dict(
@@ -421,6 +444,12 @@ class device(osv.Model):
             'ipnetwork_dev2pulse_rel', 'device_id', 'pulse_id',
             string='Pulse Issues',
             ),
+        'recent_screenshots': fields.function(
+                _get_current_screenshots,
+                type='html',
+                string='Screen Shots',
+                ),
+        'screenshots': files('screenshot', string='Screenshots', style='images', sort='newest'),
         }
 
     _defaults = {
@@ -459,6 +488,33 @@ class device(osv.Model):
                 raise ERPError('O/S Error', '\n---\n'.join([job.stdout, job.stderr]))
             job = Execute('ssh %s' % dev.ip_addr, pty=True, input='yes\n', timeout=300)
             return self.update_status(cr, uid, dev.id, context=context)
+
+
+class screenshot(osv.Model):
+    "on-line session screen shot"
+    _name = 'ip_network.device.screenshot'
+    _rec_name = 'id'
+
+    def _get_screenshot(self, cr, uid, ids, field_name, value, context):
+        res = {}
+        ind = self.pool.get('ip_network.device')
+        for ss in self.browse(cr, uid, ids, context=context):
+            perms, (root, trunk, branch, leaf) = ind.fnxfs_field_info(cr, uid, ss.device_id.id, 'screenshots', context=context)
+            target_path = reduce(div, [p for p in [root, trunk, branch, leaf] if p])
+            with open(target_path/ss.name, 'rb') as image:
+                data = image.read().encode('base64')
+            res[ss.id] = data
+        return res
+
+    _columns = {
+        'name': fields.char('Image Name', size=64),
+        'image': fields.function(
+                _get_screenshot,
+                string='Screenshot',
+                type='binary',
+                ),
+        'device_id': fields.many2one('ip_network.device', 'IP Device'),
+        }
 
 
 class command(osv.Model):
@@ -1523,3 +1579,4 @@ dynamic_devices = (
                             ~field name=field.name nolabel='1' options="{'no_embed': True}"
 """
 )
+

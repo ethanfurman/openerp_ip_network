@@ -221,7 +221,7 @@ def list_commands():
 
 
 @Command(
-        command=Spec('which command to run', ),
+        command=Spec('which command to run', REQUIRED),
         networks=('which network(s) to test against', MULTIREQ),
         scan_timeout=Spec('how long to allow ip scan to run', OPTION),
         threads=Spec('number of threads to use', OPTION, 'j'),

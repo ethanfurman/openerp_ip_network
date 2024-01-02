@@ -1189,10 +1189,10 @@ class pulse(osv.Model):
             # any pulses?
             count = 0
             for pulse in dev.pulse_ids:
-                if pulse.state is HISTORICAL:
+                if pulse.state == HISTORICAL:
                     # no longer running
                     continue
-                if pulse.state is SUSPENDED:
+                if pulse.state == SUSPENDED:
                     # have we passed the suspended date?
                     if now < pulse.deadline:
                         # nope, ignore it

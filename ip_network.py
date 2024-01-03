@@ -1046,10 +1046,12 @@ class pulse(osv.Model):
             string='Device',
             ),
         'paused_reason': fields.char('Reason for suspension', size=128),
+        'trigger_device_state': fields.boolean('Update device status'),
         }
 
     _defaults = {
         'state': NORMAL,
+        'trigger_device_state': False,
         }
 
     _sql_constraints = [
@@ -1184,11 +1186,14 @@ class pulse(osv.Model):
         #
         # cycle through the devices
         for dev_int_ip, dev in devices.items():
+            trigger_device = False
+            device_state = dev.status
             old_clues = [c for c in (dev.clues or '').split('\n') if c]
             new_clues = [c for c in old_clues if not c.startswith('pulse: ')]
             # any pulses?
             count = 0
             for pulse in dev.pulse_ids:
+                trigger_device |= pulse.trigger_device_state
                 if pulse.state == HISTORICAL:
                     # no longer running
                     continue
@@ -1224,10 +1229,9 @@ class pulse(osv.Model):
                 message %= count
                 new_clues.append(message)
             if sorted(old_clues) != sorted(new_clues):
-                values = {
-                        'clues': '\n'.join(new_clues),
-                        'status': (GOOD, DANGER)[bool(new_clues)],
-                        }
+                values = {'clues': ' / '.join(new_clues)}
+                if trigger_device and dev.status != DANGER:
+                    values['status'] = (GOOD, WARNING)[bool(new_clues)]
                 network_device.write(cr, uid, dev.id, values, context=context)
         return True
 

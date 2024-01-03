@@ -213,6 +213,8 @@
                             @frequency
                             @last_seen
                             @deadline
+                            ~separator colspan='2'
+                            @trigger_device_state
                         ~group
                             @beat_ids options='{"no_open": True}'
 

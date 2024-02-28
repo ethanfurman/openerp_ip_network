@@ -1192,7 +1192,7 @@ class pulse(osv.Model):
             old_clues = [c for c in (dev.clues or '').split('\n') if c]
             new_clues = [c for c in old_clues if not c.startswith('pulse: ')]
             old_clues_kanban = [c for c in (dev.clues_kanban or '').split('\n') if c]
-            new_clues_kanban = [c for c in old_clues_kanban if not c.startswith('pulse: ')]
+            new_clues_kanban = new_clues[:]
             # any pulses?
             count = 0
             count_kanban = 0
@@ -1241,7 +1241,7 @@ class pulse(osv.Model):
             if sorted(old_clues) != sorted(new_clues):
                 values['clues'] = '\n'.join(new_clues)
             if sorted(old_clues_kanban) != sorted(new_clues_kanban):
-                values['clues_kanban'] = '\n'.join(new_clues_kanban)
+                values['clues_kanban'] = '; '.join(new_clues_kanban)
             if trigger_device and dev.status != DANGER:
                 values['status'] = (GOOD, WARNING)[bool(new_clues)]
             if values:

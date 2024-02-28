@@ -144,7 +144,7 @@
                                                     ~div
                                                         @last_comms
                                                     ~div
-                                                        @clues
+                                                        @clues_kanban
                                 ~button type='object' @update_status .oe_avatar .oe_kanban_avatar_smallbox
                                     ~img src='/web/static/src/img/icons/gtk-refresh.png'
 
@@ -189,8 +189,9 @@
             @name: ip_network.pulse.tree
             @model: = pulse
             @arch type='xml'
-                ~tree $IP_Devices colors="black:state=='normal':gray:state=='suspended';red:state!='normal' and state!='suspended'"
+                ~tree $IP_Devices colors="black:state=='normal':gray:state=='suspended' or state=='historical';blue:(state=='overdue' or state=='failed') and trigger_device_state==True;red:state=='overdue' or state=='failed'"
                     @state invisible='1'
+                    @trigger_device_state invisible='1'
                     @name
                     @frequency
                     @last_seen

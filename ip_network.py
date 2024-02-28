@@ -391,6 +391,7 @@ class device(osv.Model):
         'status': fields.selection(DeviceStatus, 'Status'),
         'last_comms': fields.datetime('Last Communication'),
         'clues': fields.text('Problem areas'),
+        'clues_kanban': fields.text('Problem areas (kanban view)'),
         'errors': fields.html('Errors encountered'),
         # image: all image fields are base64 encoded and PIL-supported
         'image': fields.function(
@@ -921,6 +922,7 @@ class remote_scripts(osv.Model):
 class pulse(osv.Model):
     "track health of network devices and jobs"
     _name = 'ip_network.pulse'
+    _order = 'trigger_device_state desc, state desc, name asc'
 
     def _calc_name(self, cr, uid, ids, field_name, arg, context):
         """
@@ -1187,11 +1189,13 @@ class pulse(osv.Model):
         # cycle through the devices
         for dev_int_ip, dev in devices.items():
             trigger_device = False
-            device_state = dev.status
             old_clues = [c for c in (dev.clues or '').split('\n') if c]
             new_clues = [c for c in old_clues if not c.startswith('pulse: ')]
+            old_clues_kanban = [c for c in (dev.clues_kanban or '').split('\n') if c]
+            new_clues_kanban = [c for c in old_clues_kanban if not c.startswith('pulse: ')]
             # any pulses?
             count = 0
+            count_kanban = 0
             for pulse in dev.pulse_ids:
                 trigger_device |= pulse.trigger_device_state
                 if pulse.state == HISTORICAL:
@@ -1213,9 +1217,13 @@ class pulse(osv.Model):
                         count += 1
                         # make sure status is OVERDUE
                         new_state = OVERDUE
+                        if pulse.trigger_device_state:
+                            count_kanban += 1
                 elif beat.action in (ALERT, TRIP):
                     new_state = FAILED
                     count += 1
+                    if pulse.trigger_device_state:
+                        count_kanban += 1
                     if beat.action is ALERT:
                         # TODO: notify via text message
                         pass
@@ -1226,12 +1234,17 @@ class pulse(osv.Model):
                     self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
             # processed all the pulses for this device -- have the clues changed?
             if count:
-                message %= count
-                new_clues.append(message)
+                new_clues.append(message % count)
+            if count_kanban:
+                new_clues_kanban.append(message % count_kanban)
+            values = {}
             if sorted(old_clues) != sorted(new_clues):
-                values = {'clues': ' / '.join(new_clues)}
-                if trigger_device and dev.status != DANGER:
-                    values['status'] = (GOOD, WARNING)[bool(new_clues)]
+                values['clues'] = '\n'.join(new_clues)
+            if sorted(old_clues_kanban) != sorted(new_clues_kanban):
+                values['clues_kanban'] = '\n'.join(new_clues_kanban)
+            if trigger_device and dev.status != DANGER:
+                values['status'] = (GOOD, WARNING)[bool(new_clues)]
+            if values:
                 network_device.write(cr, uid, dev.id, values, context=context)
         return True
 

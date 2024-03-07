@@ -354,7 +354,7 @@ class device(osv.Model):
             snippets = []
             for f in files:
                 if f.isfile() or (f/'CURRENT').isfile():
-                    snippets.append(screenshot % (device.ip_addr, f))
+                    snippets.append(screenshot % (device.ip_addr, f.filename))
                 if len(snippets) == 3:
                     break
             res[dev_id] = '\n'.join(snippets)

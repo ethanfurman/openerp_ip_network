@@ -497,7 +497,8 @@ class device(osv.Model):
 class screenshot(osv.Model):
     "on-line session screen shot"
     _name = 'ip_network.device.screenshot'
-    _rec_name = 'id'
+    _rec_name = 'name'
+    _order = 'device_addr_as_int asc, name desc'
 
     def _get_screenshot(self, cr, uid, ids, field_name, value, context):
         res = {}
@@ -511,13 +512,19 @@ class screenshot(osv.Model):
         return res
 
     _columns = {
-        'name': fields.char('Image Name', size=64),
+        'name': fields.char('Image Name', size=64, help='timestamp of image'),
         'image': fields.function(
                 _get_screenshot,
                 string='Screenshot',
                 type='binary',
                 ),
         'device_id': fields.many2one('ip_network.device', 'IP Device'),
+        'device_addr_as_int': fields.related(
+            'device_id', 'ip_addr_as_int',
+            string='Device address',
+            type='char',
+            store=True,
+            ),
         }
 
 

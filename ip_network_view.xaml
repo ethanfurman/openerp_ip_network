@@ -166,12 +166,19 @@
             @arch type='xml'
                 ~tree $Screen_Shot version='7.0'
                     @device_id
+                    @name
 
         ~record model=view #view_ip_network_device_screenshot_form
             @name: ip_network.device.screenshot.form
             @model: = screenshot
             @arch type='xml'
                 ~form $Screen_Shot version='7.0'
+                    ~label for='device_id' .oe_inline
+                    @device_id .oe_inline
+                    ~br
+                    ~label for='name' .oe_inline
+                    @name .oe_inline
+                    ~hr
                     @image widget='image'
 
         ~record model=action #action_ip_network_device_screenshot

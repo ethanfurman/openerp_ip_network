@@ -343,7 +343,7 @@ class device(osv.Model):
         for dev_id, root, trunk, branch, leaf in paths:
             target_path = reduce(div, [p for p in [root, trunk, branch, leaf] if p])
             if target_path.exists():
-                files = target_path.listdir()
+                files = target_path.glob()
             else:
                 files = []
             if not files:
@@ -352,8 +352,11 @@ class device(osv.Model):
             device = self.browse(cr, uid, dev_id, context=context)
             files.sort(reverse=True)
             snippets = []
-            for f in files[:3]:
-                snippets.append(screenshot % (device.ip_addr, f))
+            for f in files:
+                if f.isfile() or (f/'CURRENT').isfile():
+                    snippets.append(screenshot % (device.ip_addr, f))
+                if len(snippets) == 3:
+                    break
             res[dev_id] = '\n'.join(snippets)
         return res
 

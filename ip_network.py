@@ -983,9 +983,9 @@ class pulse(osv.Model):
                         target_date = target_date.replace(delta_day=+1, hour=5, minute=30)
                     res[pulse_id]['deadline'] = target_date
                 elif freq is DAILY:
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+1, delta_hour=+2))
+                    res[pulse_id]['deadline'] = last_date.replace(delta_day=+1, delta_hour=+2)
                 elif freq is WEEKLY:
-                    res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_day=+7, delta_hour=+2))
+                    res[pulse_id]['deadline'] = last_date.replace(delta_day=+7, delta_hour=+2)
                 elif freq is MONTHLY:
                     res[pulse_id]['deadline'] = FederalHoliday.next_business_day(last_date.replace(delta_month=+1, delta_hour=+2))
                 elif freq is QUARTERLY:

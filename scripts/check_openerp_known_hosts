@@ -1,4 +1,4 @@
-#!/usr/local/bin/suid-python
+#!/usr/local/bin/suid-python --virtualenv=/opt/openerp
 """
 Ensures /home/openerp/.ssh/known_hosts is owned by openerp.
 

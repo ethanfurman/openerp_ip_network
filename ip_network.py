@@ -1240,7 +1240,7 @@ class pulse(osv.Model):
                 else: # beat action must be CLEAR
                     pass
                 # make sure status is current
-                if pulse.state is not new_state:
+                if pulse.state != new_state:
                     self.write(cr, uid, pulse.id, {'state':new_state}, context=context)
             # processed all the pulses for this device -- have the clues changed?
             if count:

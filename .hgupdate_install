@@ -1,2 +1,2 @@
 scripts/query ip_network_query --suid
-scripts/check_openerp_known_hosts $local
+scripts/check_openerp_known_hosts $local --suid

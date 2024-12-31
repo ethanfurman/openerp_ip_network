@@ -24,14 +24,18 @@ def check_openerp_known_hosts(test):
             errors.append('testing notifications')
         else:
             openerp_ids = tuple(pwd.getpwnam('openerp')[2:4])
+            print('openerp: %r' % (openerp_ids, ))
             kh = Path('/home/openerp/.ssh/known_hosts')
             stat = kh.stat()
-            file_ids = tuple(stat.st_uid, stat.st_gid)
+            file_ids = stat.st_uid, stat.st_gid
+            print('file: %r' % (file_ids, ))
             if openerp_ids != file_ids:
                 errors.append('known_hosts is owned by %r' % (file_ids, ))
+                print('not owned by openerp')
                 # change ownership back to openerp
                 kh.chown(*openerp_ids)
     except Exception as e:
+        print('oops: %s' % e)
         errors.append(str(e))
     #
     notify = Notify(script_name)

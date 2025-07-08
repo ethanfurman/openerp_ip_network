@@ -176,8 +176,9 @@
                     ~label for='device_id' .oe_inline
                     @device_id .oe_inline
                     ~br
-                    ~label for='name' .oe_inline
-                    @name .oe_inline
+                    ~div .oe_view_only
+                        ~label for='name' .oe_inline
+                        @name .oe_inline
                     ~hr
                     @image widget='image'
 

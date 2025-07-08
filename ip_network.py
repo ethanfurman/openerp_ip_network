@@ -1,6 +1,5 @@
 from __future__ import print_function
 
-# imports
 from antipathy import Path
 from ast import literal_eval
 from dbf import DateTime, Time
@@ -28,7 +27,7 @@ import textwrap
 import threading
 import traceback
 
-# config
+## config
 _logger = logging.getLogger(__name__)
 CONFIG = OrmFile(Path('/%s/fnx.ini' % CONFIG_DIR), types={'_path': Path})
 KNOWN_HOSTS = Path(pwd.getpwnam('openerp')[5]) / '.ssh/known_hosts'
@@ -131,7 +130,7 @@ def _ip2int(module, cr, uid, ids, field_name, arg, context):
         res[device_rec['id']] = '%010d' % ip_as_int
     return res
 
-# Tables
+## tables
 
 class network(osv.Model):
     "each record is a network to monitor"
@@ -506,19 +505,34 @@ class screenshot(osv.Model):
         for ss in self.browse(cr, uid, ids, context=context):
             perms, (root, trunk, branch, leaf) = ind.fnxfs_field_info(cr, uid, ss.device_id.id, 'screenshots', context=context)
             target_path = reduce(div, [p for p in [root, trunk, branch, leaf] if p])
-            with open(target_path/ss.name, 'rb') as image:
-                data = image.read().encode('base64')
+            data = False
+            if target_path.exists(ss.name):
+                with open(target_path/ss.name, 'rb') as image:
+                    data = image.read().encode('base64')
             res[ss.id] = data
         return res
 
+    def _set_screenshot(self, cr, uid, id, name, value, args, context=None):
+        _logger.warning('_set_screenshot for %r', name)
+        ind = self.pool.get('ip_network.device')
+        for ss in self.browse(cr, uid, [id], context=context):
+            perms, (root, trunk, branch, leaf) = ind.fnxfs_field_info(cr, uid, ss.device_id.id, 'screenshots', context=context)
+            target_path = reduce(div, [p for p in [root, trunk, branch, leaf] if p])
+            if not target_path.exists():
+                target_path.makedirs()
+            with open(target_path/ss.name, 'wb') as image:
+                data = image.write(value.decode('base64'))
+        return True
+
     _columns = {
-        'name': fields.char('Image Name', size=64, help='timestamp of image'),
+        'name': fields.char('Timestamp', size=64, help='timestamp of image in UTC'),
         'image': fields.function(
                 _get_screenshot,
+                fnct_inv=_set_screenshot,
                 string='Screenshot',
                 type='binary',
                 ),
-        'device_id': fields.many2one('ip_network.device', 'IP Device'),
+        'device_id': fields.many2one('ip_network.device', 'IP Device', required=True),
         'device_addr_as_int': fields.related(
             'device_id', 'ip_addr_as_int',
             string='Device address',
@@ -526,6 +540,21 @@ class screenshot(osv.Model):
             store=True,
             ),
         }
+
+    def create(self, cr, uid, values, context=None):
+        if not values.get('device_id'):
+            raise ERPError('Missing values', 'IP Device must be specified')
+        if not values.get('image'):
+            raise ERPError('Missing values', 'Screen shot image not provided')
+        image = values['image'].decode('base64')
+        if image[:4] == '\xff\xd8\xff\xe0' and image[6:10] == 'JFIF':
+            ext = '.jpg'
+        elif image[1:4] == 'PNG':
+            ext = '.png'
+        else:
+            ext = '.img'
+        values['name'] = DateTime.now().strftime('%Y-%m-%d_%H:%M:%S') + ext
+        return super(screenshot, self).create(cr, uid, values, context)
 
 
 class command(osv.Model):
@@ -1323,7 +1352,7 @@ class pulse_beat(osv.Model):
 
 
 
-# utilities
+## utilities
 
 def field_to_dict(command):
     f_type = command.type

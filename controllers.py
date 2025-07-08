@@ -39,7 +39,7 @@ class ScreenShot(Controller):
         ip = ip[3:]
         if image[:4] == '\xff\xd8\xff\xe0' and image[6:10] == 'JFIF':
             ext = '.jpg'
-        elif image[:4] == '%PNG':
+        elif image[1:4] == 'PNG':
             ext = '.png'
         else:
             ext = '.img'

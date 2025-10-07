@@ -1125,51 +1125,52 @@ class pulse(osv.Model):
             try:
                 with open(message_file) as f:
                     data = f.read()
-                data = literal_eval(data
-                        .replace('datetime.datetime','')
-                        .replace('datetime.date','')
-                        .replace('datetime.time','')
-                        )
-                job = data['job_name']
-                ip = data['ip_address']
-                freq = JobFrequency(data['frequency'])
-                action = data.get('action')
-                timestamp = DateTime(*data['timestamp'])
-                # convert timestamp from server's timezone to UTC
-                timestamp = timestamp.replace(tzinfo=SERVER_TIMEZONE).astimezone(UTC)
-                if not action:
-                    if freq is URGENT:
-                        action = 'trip'
-                    else:
-                        action = 'ping'
-                beat_model = self.pool.get('ip_network.pulse.beat')
-                # retrieve or create pulse
-                pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
-                if pulse_jobs:
-                    pulse_job = pulse_jobs[0]
-                    pulse_id = pulse_job.id
-                    if freq is not URGENT and pulse_job.frequency != freq:
-                        self.write(cr, uid, pulse_id, {'frequency': freq}, context=context)
-                else:
-                    pulse_id = self.create(
-                            cr, uid,
-                            {'job': job, 'ip_addr': ip, 'frequency': freq, 'last_seen': timestamp},
-                            context=context,
+                if data:
+                    data = literal_eval(data
+                            .replace('datetime.datetime','')
+                            .replace('datetime.date','')
+                            .replace('datetime.time','')
                             )
-                    # after creating new pulse, link to appropriate devices
-                    # primary device is in `ip`, secondary device is in `job`
-                    q1, q2, q3, q4 = map(int, ip.split('.'))
-                    primary_as_int = '%010d' % ((q1 << 24) + (q2 << 16) + (q3 << 8) + q4)
-                    linked_ids = [(4, devices[primary_as_int].id)]
-                    if match(r'(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})', job):
-                        q1, q2, q3, q4 = map(int, match.groups())
-                        secondary_as_int = '%010d' % ((q1 << 24) + (q2 << 16) + (q3 << 8) + q4)
-                        secondary = devices.get(secondary_as_int)
-                        if secondary is not None:
-                            linked_ids.append((4, secondary.id))
-                    self.write(cr, uid, pulse_id, {'device_ids': linked_ids}, context=context)
-                # create beat
-                beat_model.create(cr, uid, {'pulse_id':pulse_id, 'timestamp':timestamp, 'action':action}, context=context)
+                    job = data['job_name']
+                    ip = data['ip_address']
+                    freq = JobFrequency(data['frequency'])
+                    action = data.get('action')
+                    timestamp = DateTime(*data['timestamp'])
+                    # convert timestamp from server's timezone to UTC
+                    timestamp = timestamp.replace(tzinfo=SERVER_TIMEZONE).astimezone(UTC)
+                    if not action:
+                        if freq is URGENT:
+                            action = 'trip'
+                        else:
+                            action = 'ping'
+                    beat_model = self.pool.get('ip_network.pulse.beat')
+                    # retrieve or create pulse
+                    pulse_jobs = self.browse(cr, uid, [('job','=',job),('ip_addr','=',ip)], context=context)
+                    if pulse_jobs:
+                        pulse_job = pulse_jobs[0]
+                        pulse_id = pulse_job.id
+                        if freq is not URGENT and pulse_job.frequency != freq:
+                            self.write(cr, uid, pulse_id, {'frequency': freq}, context=context)
+                    else:
+                        pulse_id = self.create(
+                                cr, uid,
+                                {'job': job, 'ip_addr': ip, 'frequency': freq, 'last_seen': timestamp},
+                                context=context,
+                                )
+                        # after creating new pulse, link to appropriate devices
+                        # primary device is in `ip`, secondary device is in `job`
+                        q1, q2, q3, q4 = map(int, ip.split('.'))
+                        primary_as_int = '%010d' % ((q1 << 24) + (q2 << 16) + (q3 << 8) + q4)
+                        linked_ids = [(4, devices[primary_as_int].id)]
+                        if match(r'(\d{1,3})_(\d{1,3})_(\d{1,3})_(\d{1,3})', job):
+                            q1, q2, q3, q4 = map(int, match.groups())
+                            secondary_as_int = '%010d' % ((q1 << 24) + (q2 << 16) + (q3 << 8) + q4)
+                            secondary = devices.get(secondary_as_int)
+                            if secondary is not None:
+                                linked_ids.append((4, secondary.id))
+                        self.write(cr, uid, pulse_id, {'device_ids': linked_ids}, context=context)
+                    # create beat
+                    beat_model.create(cr, uid, {'pulse_id':pulse_id, 'timestamp':timestamp, 'action':action}, context=context)
                 try:
                     message_file.copy(archive_dir)
                 except Exception:

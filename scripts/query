@@ -75,7 +75,7 @@ else:
     PW = settings.openerp.pw
     NETWORK_PW = settings.network.pw
 
-# API
+## API
 
 @Script(
         host=('host where OpenERP instance is running', OPTION, None),
@@ -191,12 +191,8 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
     # sort addresses that actually exist first
     OE_DEVICES = dict(
         (IPv4Address(unicode(d.ip_addr)), d)
-        # (IPv4Address(unicode(d.ip_addr)), {'id': d.id, 'ip_addr': d.ip_addr, 'type_id': Type(d.type_id), 'type_source': d.type_source})
         for d in get_records(oe.device, fields=['id', 'ip_addr', 'status', 'type_id', 'type_source', 'last_comms'])
         )
-    # for dev in OE_DEVICES.values():
-    #     dev.type_id = Type(dev.type_id.id)
-    # addresses.sort(key=lambda a: (1, 0)[a in OE_DEVICES])
     errors = {}
     try:
         if threads:
@@ -288,7 +284,7 @@ def test(command, networks, scan_timeout=60, threads=0, update=False, gui=0):
     display_errors(errors)
 
 
-# support
+## support
 
 max_elapsed = 0
 
@@ -607,7 +603,6 @@ def single_command(command, results, errors, address):
         elif 'remote host identification has changed' in job.stderr.lower():
             raise HostIDChanged(job.stderr)
         elif command.name == 'Network Search':
-            # results['portscan'] = {'status': {'value': Status.unknown}}
             results['status'] = {'value': Status.unknown}
             results['ip_addr'] = {'value': address}
             results['type_id'] = {'value': Type.tarpit}
@@ -638,7 +633,6 @@ def single_command(command, results, errors, address):
             print('-----', verbose=3)
             print('field_name: %r' % (field_name, ), verbose=3)
             print('subdict: %r' % (subdict, ), verbose=3)
-            # print('%s: %r' % (field_name, subdict['value']), verbose=3)
         print('-----', verbose=3)
     except Exception:
         job_error = '%(stdout)s\n---\n%(stderr)s' % {
@@ -654,7 +648,6 @@ def single_command(command, results, errors, address):
         if 'ip_addr' not in results:
             # make sure ip_addr is set
             results['ip_addr'] = {'value': address}
-        # if results['portscan']['status'] is not Status.offline:
         if results['portscan']['status'] is not Status.offline:
             results['last_comms'] = {'value': DateTime.now()}
         else:
@@ -669,7 +662,6 @@ def single_command(command, results, errors, address):
             #
             # only record errors for this host if it already had an entry in OpenERP
             print('                   device:', device, verbose=3, border='lined')
-            # results['status'] = {'value': Status.offline}
             if device.id and device.status is not Status.retired:
                 errors.setdefault('by_ip', {})
                 errors.setdefault('by_command', {})['Unreachable Hosts'] = address
@@ -897,8 +889,6 @@ class Task(object):
     def __repr__(self):
         return 'Task(%r)' % (
                     self.func,
-                    # ', '.join(self.args),
-                    # ', '.join(['%s=%s' % (k, v) for k, v in self.kwds.items()]),
                     )
 
     def activate(self):

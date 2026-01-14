@@ -541,8 +541,9 @@ def single_command(command, results, errors, address):
     print('                   Types:', list(Type), verbose=4)
     device = OE_DEVICES.get(
             address,
-            AttrDict(id=False, ip_addr=address, name=False, type_source=TypeSource.system, type_id=Type.unknown, last_comms=False),
-            )
+            AttrDict(id=False, ip_addr=address, name=False, type_source=TypeSource.system,
+                     type_id=Type.unknown, last_comms=False, sshable=True,
+                     ))
     print('                   device: %r' % device, verbose=2)
     if device.type_source is TypeSource.user:
         results['type_id'] = {'value': device.type_id}
@@ -551,6 +552,10 @@ def single_command(command, results, errors, address):
     if run_for and results.get('type_id', {}).get('value', None) not in run_for:
         _logger.debug('%r; skpping', address)
         print('                   skipping command', command.name)
+        return False
+    elif command.where == 'ssh' and not device.sshable:
+        _logger.debug('%r; not sshable, skpping', address)
+        print('                   skipping command (not sshable)', command.name)
         return False
     start_time = time.time()
     job = Job(commandline, pty=pty)

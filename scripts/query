@@ -10,8 +10,6 @@ do the heavy lifting outside the OpenERP process space.
 Default time zone is America/Los Angeles.
 """
 
-# imports
-
 from __future__ import print_function
 from aenum import MultiValueEnum
 from antipathy import Path
@@ -25,7 +23,6 @@ from pprint import pformat
 from Queue import Queue, Empty
 from threading import Thread, Lock#, active_count#, current_thread
 from traceback import format_exc
-# from traceback import extract_tb, format_exc, format_list
 import sys
 import termios
 import time
@@ -51,7 +48,7 @@ server_timezone = timezone(tz_value)
 
 START = time.time()
 
-# globals
+## globals
 
 VIRTUAL_ENV = os.environ['VIRTUAL_ENV']
 CONFIG = Path('/%s/config/fnx.ini' % VIRTUAL_ENV)
@@ -191,7 +188,7 @@ def for_openerp(networks=None, scan_timeout=900, threads=32, delay=1, update=Tru
     # sort addresses that actually exist first
     OE_DEVICES = dict(
         (IPv4Address(unicode(d.ip_addr)), d)
-        for d in get_records(oe.device, fields=['id', 'ip_addr', 'status', 'type_id', 'type_source', 'last_comms'])
+        for d in get_records(oe.device, fields=['id', 'ip_addr', 'status', 'type_id', 'type_source', 'last_comms', 'sshable'])
         )
     errors = {}
     try:
